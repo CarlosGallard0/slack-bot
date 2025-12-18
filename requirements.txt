@@ -1,3 +1,5 @@
+botbuilder-core
+aiohttp
 langchain
 langchain-chroma
 langchain-openai
