@@ -1,6 +1,8 @@
 langchain
 langchain-chroma
 langchain-openai
+langchain-google-vertexai
+langchain-google-genai
 langchain-community
 slack-bolt
 python-dotenv

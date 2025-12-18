@@ -19,7 +19,11 @@ class SlackProvider(BaseProvider):
         @self.app.event("app_mention")
         def handle_mentions(event, say):
             text = event.get("text")
-            query = text.split(">")[-1].strip()
+            if not text:
+                return
+            if isinstance(text, list):
+                text = " ".join(str(t) for t in text)
+            query = str(text).split(">")[-1].strip()
             self._respond_with_thinking(event["channel"], query, say)
 
         @self.app.message("") # Listen to all messages in channels where bot is present
@@ -27,6 +31,11 @@ class SlackProvider(BaseProvider):
             # Only respond to direct messages for now to avoid spamming
             if message.get("channel_type") == "im":
                 text = message.get("text")
+                if not text:
+                    return
+                if isinstance(text, list):
+                    text = " ".join(str(t) for t in text)
+                text = str(text)
                 self._respond_with_thinking(message["channel"], text, say)
 
     def _respond_with_thinking(self, channel, query, say):

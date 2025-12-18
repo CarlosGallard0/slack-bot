@@ -1,12 +1,33 @@
 import os
+from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+load_dotenv()
+
 class RAGSystem:
     def __init__(self, data_path="data"):
-        self.embeddings = OpenAIEmbeddings()
+        provider = os.getenv("EMBEDDING_PROVIDER", "openai").lower()
+        model_name = os.getenv("EMBEDDING_MODEL") # LangChain defaults if None
+        
+        if provider == "openai":
+            self.embeddings = OpenAIEmbeddings(model=model_name) if model_name else OpenAIEmbeddings()
+        elif provider == "vertexai":
+            project_id = os.getenv("PROJECT_ID")
+            location = os.getenv("LOCATION", "us-central1")
+            api_key = os.getenv("VERTEX_API_KEY")
+            self.embeddings = GoogleGenerativeAIEmbeddings(
+                model=model_name if model_name else "text-embedding-005",
+                project=project_id,
+                location=location,
+                api_key=api_key
+            )
+        else:
+            raise ValueError(f"Unsupported embedding provider: {provider}")
+
         self.persist_directory = "db"
         self.data_path = data_path
         self.vectorstore = None
@@ -49,4 +70,5 @@ class RAGSystem:
         if not self.vectorstore:
             self.initialize()
         return self.vectorstore.as_retriever()
+
 

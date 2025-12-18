@@ -1,12 +1,36 @@
+import os
+from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.tools import tool
-from langchain_classic.agents import AgentExecutor, create_openai_tools_agent
+from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from src.rag.store import RAGSystem
 
+load_dotenv()
+
 class AgentCore:
     def __init__(self):
-        self.llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+        provider = os.getenv("MODEL_PROVIDER", "openai").lower()
+        model_name = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
+        temperature = float(os.getenv("MODEL_TEMPERATURE", "0"))
+
+        if provider == "openai":
+            self.llm = ChatOpenAI(model=model_name, temperature=temperature)
+        elif provider == "vertexai":
+            project_id = os.getenv("PROJECT_ID")
+            location = os.getenv("LOCATION", "us-west1")
+            api_key = os.getenv("VERTEX_API_KEY")
+            self.llm = ChatGoogleGenerativeAI(
+                model=model_name,
+                temperature=temperature,
+                project=project_id,
+                location=location,
+                api_key=api_key
+            )
+        else:
+            raise ValueError(f"Unsupported provider: {provider}")
+
         self.rag = RAGSystem()
         self.agent_executor = None
 
@@ -34,8 +58,8 @@ class AgentCore:
             MessagesPlaceholder(variable_name="agent_scratchpad"),
         ])
 
-        # Create the agent using the modern tools API
-        agent = create_openai_tools_agent(self.llm, tools, prompt)
+        # Create the agent using the generic tool-calling agent factory
+        agent = create_tool_calling_agent(self.llm, tools, prompt)
         
         # Wrap in AgentExecutor
         self.agent_executor = AgentExecutor(
@@ -54,5 +78,19 @@ class AgentCore:
         
         # The executor uses 'input' as the key and returns 'output'
         response = self.agent_executor.invoke({"input": query})
-        return response["output"]
+        output = response["output"]
+
+        # Handle cases where output might be a list (common with some Gemini models)
+        if isinstance(output, list):
+            # Extract text from content blocks if necessary
+            text_parts = []
+            for part in output:
+                if isinstance(part, dict) and 'text' in part:
+                    text_parts.append(part['text'])
+                else:
+                    text_parts.append(str(part))
+            return "".join(text_parts)
+        
+        return str(output)
+
 
