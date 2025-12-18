@@ -3,20 +3,17 @@ import sys
 import shutil
 from dotenv import load_dotenv
 
-# Add the project root to the path so we can import 'src'
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.rag.store import RAGSystem
 
+load_dotenv()
+
 def ingest():
-    load_dotenv()
-    
-    # Configuration
     persist_directory = "db"
     
     print("--- RAG Ingestion Tool ---")
     
-    # Optional: Clear existing database to force a full re-index
     if os.path.exists(persist_directory):
         choice = input(f"Database found in '{persist_directory}'. Do you want to overwrite it? (y/N): ").lower()
         if choice == 'y':
@@ -25,7 +22,6 @@ def ingest():
         else:
             print("Existing database will be kept. Adding new documents if any...")
 
-    # Initialize RAG System
     rag = RAGSystem()
     
     print("Starting ingestion process...")

@@ -9,28 +9,32 @@ from src.rag.store import RAGSystem
 
 load_dotenv()
 
+def get_model_from_provider():
+    provider = os.getenv("MODEL_PROVIDER", "openai").lower()
+    model_name = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
+    temperature = float(os.getenv("MODEL_TEMPERATURE", "0"))
+    llm = None
+
+    if provider == "openai":
+        llm = ChatOpenAI(model=model_name, temperature=temperature)
+    elif provider == "vertexai":
+        project_id = os.getenv("PROJECT_ID")
+        location = os.getenv("LOCATION", "us-west1")
+        api_key = os.getenv("VERTEX_API_KEY")
+        llm = ChatGoogleGenerativeAI(
+            model=model_name,
+            temperature=temperature,
+            project=project_id,
+            location=location,
+            api_key=api_key
+        )
+    else:
+        raise ValueError(f"Unsupported provider: {provider}")
+    return llm
+
 class AgentCore:
     def __init__(self):
-        provider = os.getenv("MODEL_PROVIDER", "openai").lower()
-        model_name = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
-        temperature = float(os.getenv("MODEL_TEMPERATURE", "0"))
-
-        if provider == "openai":
-            self.llm = ChatOpenAI(model=model_name, temperature=temperature)
-        elif provider == "vertexai":
-            project_id = os.getenv("PROJECT_ID")
-            location = os.getenv("LOCATION", "us-west1")
-            api_key = os.getenv("VERTEX_API_KEY")
-            self.llm = ChatGoogleGenerativeAI(
-                model=model_name,
-                temperature=temperature,
-                project=project_id,
-                location=location,
-                api_key=api_key
-            )
-        else:
-            raise ValueError(f"Unsupported provider: {provider}")
-
+        self.llm = get_model_from_provider()
         self.rag = RAGSystem()
         self.agent_executor = None
 
@@ -51,17 +55,14 @@ class AgentCore:
 
         tools = [retrieve_knowledge]
         
-        # Modern prompt for a tool-calling agent
         prompt = ChatPromptTemplate.from_messages([
             ("system", "You are a helpful Slack assistant. Use the retrieve_knowledge tool to answer questions based on the knowledge base. If you don't know the answer, say you don't know."),
             ("human", "{input}"),
             MessagesPlaceholder(variable_name="agent_scratchpad"),
         ])
 
-        # Create the agent using the generic tool-calling agent factory
         agent = create_tool_calling_agent(self.llm, tools, prompt)
         
-        # Wrap in AgentExecutor
         self.agent_executor = AgentExecutor(
             agent=agent,
             tools=tools,
@@ -76,13 +77,10 @@ class AgentCore:
         if not self.agent_executor:
             self.setup()
         
-        # The executor uses 'input' as the key and returns 'output'
         response = self.agent_executor.invoke({"input": query})
         output = response["output"]
 
-        # Handle cases where output might be a list (common with some Gemini models)
         if isinstance(output, list):
-            # Extract text from content blocks if necessary
             text_parts = []
             for part in output:
                 if isinstance(part, dict) and 'text' in part:
