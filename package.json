@@ -1,0 +1,12 @@
+{
+  "scripts": {
+    "provision": "npx atk provision",
+    "package": "npx atk package --env dev",
+    "deploy": "npx atk deploy",
+    "preview": "npx atk preview",
+    "start": "python3 -m src.main"
+  },
+  "devDependencies": {
+    "@microsoft/m365agentstoolkit-cli": "^1.1.4"
+  }
+}

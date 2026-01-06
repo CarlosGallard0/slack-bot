@@ -65,10 +65,15 @@ class TeamsProvider(BaseProvider):
         app = web.Application()
         app.router.add_post("/api/messages", self.handle_messages)
         
-        port = int(os.environ.get("TEAMS_PORT", 3978))
-        print(f"Teams bot listening on http://localhost:{port}/api/messages")
+        # In cloud environments (Azure, GCP), the port is often provided by the PORT env var.
+        # Teams Toolkit typically defaults to 3978 for local dev.
+        port = int(os.environ.get("PORT", os.environ.get("TEAMS_PORT", 3978)))
         
-        web.run_app(app, host="localhost", port=port)
+        # Use 0.0.0.0 to listen on all interfaces, essential for cloud deployments.
+        host = "0.0.0.0"
+        print(f"Teams bot listening on http://{host}:{port}/api/messages")
+        
+        web.run_app(app, host=host, port=port)
 
     def send_message(self, channel: str, text: str):
         """Send a proactive message. (Simplified for now)"""
