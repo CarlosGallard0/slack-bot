@@ -1,4 +1,6 @@
+import asyncio
 import os
+import json
 import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
@@ -63,10 +65,24 @@ class GraphitiClient:
 
     async def initialize(self):
         """Initialize Graphiti client."""
+        # Check if we are in a new event loop
+        try:
+            current_loop = asyncio.get_running_loop()
+            if self._initialized and self._loop is not None and current_loop is not self._loop:
+                logger.warning("Event loop changed, re-initializing Graphiti client")
+                # We cannot await close() on the old loop if it is closed, so we just reset
+                self.graphiti = None
+                self._initialized = False
+        except RuntimeError:
+            # Should not happen if calling from async context
+            pass
+
         if self._initialized:
             return
 
         try:
+            self._loop = asyncio.get_running_loop()
+
             # Create LLMConfig
             llm_config = LLMConfig(
                 api_key=self.llm_api_key,

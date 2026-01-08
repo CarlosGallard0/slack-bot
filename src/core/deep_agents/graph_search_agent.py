@@ -1,21 +1,8 @@
 from langchain_core.tools import tool
-from typing import Any, Optional
 from src.core.deep_agents.graphiti import GraphitiClient
-from pydantic import BaseModel
-
-graph_client = GraphitiClient()
-
-class GraphSearchResult(BaseModel):
-    """Knowledge graph search result model."""
-
-    fact: str
-    uuid: str
-    valid_at: Optional[str] = None
-    invalid_at: Optional[str] = None
-    source_node_uuid: Optional[str] = None
 
 @tool
-async def graph_search(query: str) -> Any:
+async def graph_search_tool(query: str) -> str:
     """
     Search the knowledge graph for facts and relationships.
 
@@ -28,21 +15,47 @@ async def graph_search(query: str) -> Any:
     Returns:
         Search results as formatted text
     """
+    # Instantiate client per-call to ensure it binds to the current event loop
+    graph_client = GraphitiClient()
+    
     try:
-        # Await the async graph search on the current event loop
+        if isinstance(query, dict):
+            query = query.get("query") or query.get("text") or str(query)
+
+        if not isinstance(query, str):
+            return f"Invalid query type: {type(query)}"
+            
+        # Initialize and search
+        await graph_client.initialize()
         search_results = await graph_client.search(query)
+        
     except Exception as e:
         return f"Graph search error: {str(e)}"
+    finally:
+        # Best effort cleanup
+        try:
+            if graph_client:
+                await graph_client.close()
+        except Exception:
+            pass
     
-    return [
-    GraphSearchResult(
-        fact=r["fact"],
-        uuid=r["uuid"],
-        valid_at=r.get("valid_at"),
-        invalid_at=r.get("invalid_at"),
-        source_node_uuid=r.get("source_node_uuid"),
-    )
-    for r in search_results]
+    if not search_results:
+        return "No results found in the knowledge graph."
+    
+    # Format results as readable text
+    formatted_results = []
+    for r in search_results:
+        if isinstance(r, dict):
+            fact = r.get("fact", "")
+            uuid = r.get("uuid", "")
+        else:
+            fact = getattr(r, "fact", "")
+            uuid = getattr(r, "uuid", "")
+        formatted_results.append(f"- Fact: {fact}\n  ID: {uuid}")
+    
+    result_text = "\n".join(formatted_results)
+    print(f"\n--- DEBUG: Graph Search Output ---\nQuery: {query}\nResults:\n{result_text}\n----------------------------------\n")
+    return result_text
 
 # Create the graph_search subagent
 graph_search_subagent = {
@@ -54,5 +67,5 @@ graph_search_subagent = {
 3. Return comprehensive results with facts and their relationships
 
 Always use the graph_search tool to find relevant information in the knowledge graph.""",
-    "tools": [graph_search],
+    "tools": [graph_search_tool],
 }

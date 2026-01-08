@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from src.core.agent import AgentCore
+from src.core.deep_agent import AgentCore
 from src.providers.slack_provider import SlackProvider
 from src.providers.teams_provider import TeamsProvider
 

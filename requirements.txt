@@ -10,4 +10,5 @@ slack-bolt
 python-dotenv
 chromadb
 tiktoken
+nest_asyncio
 
