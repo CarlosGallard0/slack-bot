@@ -128,22 +128,11 @@ class SlackProvider(BaseProvider):
 
             # 3. (Optional) Add thinking as a collapsible or separate context
             if thought_text:
-                # blocks[:0] inserts these items at the very start of the list
-                blocks[:0] = [
-                    {
-                        "type": "context",
-                        "elements": [
-                            {
-                                "type": "mrkdwn",
-                                # Truncate to avoid hitting Slack's 3000 char limit
-                                "text": f"🤖 *Thinking Process:*\n{thought_text}",
-                            }
-                        ],
-                    },
-                    {
-                        "type": "divider"
-                    },  # Separates thinking from the "Query Result" header
-                ]
+                self.app.client.chat_postMessage(
+                    channel=channel,
+                    thread_ts=initial_message["ts"],  # This puts it in the thread
+                    text=f"🤖 *Thinking Process:*\n{thought_text}",
+                )
 
             self.app.client.chat_update(
                 channel=channel,
