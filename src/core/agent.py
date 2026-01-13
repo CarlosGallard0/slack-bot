@@ -28,6 +28,7 @@ def get_model_from_provider():
             project=project_id,
             location=location,
             api_key=api_key,
+            thinking_config={"include_thoughts": True, "thinking_budget": -1},
         )
     else:
         raise ValueError(f"Unsupported provider: {provider}")

@@ -11,6 +11,7 @@ import nest_asyncio
 
 load_dotenv()
 
+
 def get_model_from_provider():
     provider = os.getenv("MODEL_PROVIDER", "openai").lower()
     model_name = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
@@ -28,7 +29,8 @@ def get_model_from_provider():
             temperature=temperature,
             project=project_id,
             location=location,
-            api_key=api_key
+            api_key=api_key,
+            thinking_config={"include_thoughts": True, "thinking_budget": -1},
         )
     else:
         raise ValueError(f"Unsupported provider: {provider}")
@@ -119,7 +121,7 @@ class AgentCore:
                 raise RuntimeError(
                     "Event loop already running; install `nest_asyncio` (pip install nest_asyncio), or use `await agent.ask_async(...)` in async contexts."
                 )
-            
+
             # Run the async function in the current event loop
             return loop.run_until_complete(self.ask_async(query))
 
@@ -138,7 +140,12 @@ class AgentCore:
 
         # Normalize input
         if isinstance(query, dict):
-            query = query.get("content") or query.get("text") or query.get("query") or str(query)
+            query = (
+                query.get("content")
+                or query.get("text")
+                or query.get("query")
+                or str(query)
+            )
         query = str(query).strip()
 
         config = {"configurable": {"thread_id": "default_thread"}}
