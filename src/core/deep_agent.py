@@ -30,7 +30,7 @@ def get_model_from_provider():
             project=project_id,
             location=location,
             api_key=api_key,
-            thinking_budget=512,
+            thinking_budget=1024,
             include_thoughts=True,
         )
     else:
