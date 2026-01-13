@@ -4,6 +4,9 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from src.providers.base import BaseProvider
 from src.core.agent import AgentCore
 import ast
+from slackstyler import SlackStyler
+
+styler = SlackStyler()
 
 
 def separate_thinking_from_response(raw_text):
@@ -112,7 +115,10 @@ class SlackProvider(BaseProvider):
                     "type": "header",
                     "text": {"type": "plain_text", "text": "Response"},
                 },
-                {"type": "section", "text": {"type": "mrkdwn", "text": clean_response}},
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": styler.convert(clean_response)},
+                },
                 {"type": "divider"},
                 {
                     "type": "context",
