@@ -48,7 +48,7 @@ class GraphitiClient:
 
         if not self.llm_api_key:
             raise ValueError("LLM_API_KEY environment variable not set")
-
+            
         # Embedding configuration
         self.embedding_base_url = os.getenv(
             "EMBEDDING_BASE_URL", "https://api.openai.com/v1"
@@ -104,6 +104,9 @@ class GraphitiClient:
                 )
             )
 
+            # Create Reranker
+            reranker = GeminiRerankerClient(client=llm_client, config=llm_config)
+
             # Initialize Graphiti with custom clients
             self.graphiti = Graphiti(
                 self.neo4j_uri,
@@ -111,6 +114,7 @@ class GraphitiClient:
                 self.neo4j_password,
                 llm_client=llm_client,
                 embedder=embedder,
+                cross_encoder=reranker
             )
 
             # Build indices and constraints
