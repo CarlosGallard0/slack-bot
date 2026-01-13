@@ -3,6 +3,53 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from src.providers.base import BaseProvider
 from src.core.agent import AgentCore
+import ast
+
+
+def separate_thinking_from_response(raw_text):
+    """
+    Separates a Python dictionary string at the start from the rest of the text.
+    Handles nested braces and quoted strings correctly.
+    """
+    if not raw_text.strip().startswith("{"):
+        return None, raw_text
+
+    balance = 0
+    in_quote = False
+    quote_char = None
+
+    for i, char in enumerate(raw_text):
+        # Toggle quote state (handle escaped quotes if necessary, simplified here)
+        if char in ['"', "'"]:
+            if not in_quote:
+                in_quote = True
+                quote_char = char
+            elif char == quote_char:
+                # check for escape char (simple check)
+                if i > 0 and raw_text[i - 1] != "\\":
+                    in_quote = False
+
+        # Count braces only if NOT inside a string
+        if not in_quote:
+            if char == "{":
+                balance += 1
+            elif char == "}":
+                balance -= 1
+
+            # If balance hits zero, we found the end of the dict
+            if balance == 0:
+                dict_part = raw_text[: i + 1]
+                response_part = raw_text[i + 1 :]
+
+                try:
+                    # Convert string dict to actual Python dict
+                    parsed_dict = ast.literal_eval(dict_part)
+                    return parsed_dict, response_part
+                except (ValueError, SyntaxError):
+                    # Fallback if parsing fails
+                    return None, raw_text
+
+    return None, raw_text
 
 
 class SlackProvider(BaseProvider):
@@ -57,24 +104,46 @@ class SlackProvider(BaseProvider):
             )
 
             response = self.agent.ask(query)
+            thought_data, clean_response = separate_thinking_from_response(response)
+            thought_text = thought_data.get("thinking") if thought_data else None
 
-            # 2. Update with a rich UI response
+            blocks = [
+                {
+                    "type": "header",
+                    "text": {"type": "plain_text", "text": "Response"},
+                },
+                {"type": "section", "text": {"type": "mrkdwn", "text": clean_response}},
+                {"type": "divider"},
+                {
+                    "type": "context",
+                    "elements": [{"type": "mrkdwn", "text": f"Query: _{query}_"}],
+                },
+            ]
+
+            # 3. (Optional) Add thinking as a collapsible or separate context
+            if thought_text:
+                # blocks[:0] inserts these items at the very start of the list
+                blocks[:0] = [
+                    {
+                        "type": "context",
+                        "elements": [
+                            {
+                                "type": "mrkdwn",
+                                # Truncate to avoid hitting Slack's 3000 char limit
+                                "text": f"🤖 *Thinking Process:*\n{thought_text}",
+                            }
+                        ],
+                    },
+                    {
+                        "type": "divider"
+                    },  # Separates thinking from the "Query Result" header
+                ]
+
             self.app.client.chat_update(
                 channel=channel,
                 ts=initial_message["ts"],
                 text="Here is your answer",  # Fallback text
-                blocks=[
-                    {
-                        "type": "header",
-                        "text": {"type": "plain_text", "text": "Query Result"},
-                    },
-                    {"type": "section", "text": {"type": "mrkdwn", "text": response}},
-                    {"type": "divider"},
-                    {
-                        "type": "context",
-                        "elements": [{"type": "mrkdwn", "text": f"Query: _{query}_"}],
-                    },
-                ],
+                blocks=blocks,
             )
         except Exception as e:
             # Error UI
