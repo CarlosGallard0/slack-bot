@@ -102,7 +102,7 @@ class AgentCore:
         # Final fallback
         return str(response).strip()
 
-    def ask(self, query: str) -> str:
+    def ask(self, query: str, thread_id: str = "default_thread") -> str:
         """
         Processes a query through the RAG agent.
         """
@@ -110,7 +110,7 @@ class AgentCore:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             # No event loop running, create a new one
-            return asyncio.run(self.ask_async(query))
+            return asyncio.run(self.ask_async(query, thread_id))
         else:
             # Event loop already running - use nest_asyncio to allow nested event loops
             try:
@@ -121,9 +121,9 @@ class AgentCore:
                 )
             
             # Run the async function in the current event loop
-            return loop.run_until_complete(self.ask_async(query))
+            return loop.run_until_complete(self.ask_async(query, thread_id))
 
-    async def ask_async(self, query: str) -> str:
+    async def ask_async(self, query: str, thread_id: str = "default_thread") -> str:
         """
         Async version of ask() — always returns a string
         """
@@ -141,7 +141,7 @@ class AgentCore:
             query = query.get("content") or query.get("text") or query.get("query") or str(query)
         query = str(query).strip()
 
-        config = {"configurable": {"thread_id": "default_thread"}}
+        config = {"configurable": {"thread_id": thread_id}}
         response = await self.agent_executor.ainvoke(
             {"messages": [{"role": "user", "content": query}]},
             config=config,

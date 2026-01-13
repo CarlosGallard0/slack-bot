@@ -42,7 +42,7 @@ class SlackProvider(BaseProvider):
             initial_message = say("Thinking...")
             
             print(f"Processing query: {query}")
-            response = self.agent.ask(query)
+            response = self.agent.ask(query, thread_id=channel)
             
             self.app.client.chat_update(
                 channel=channel,

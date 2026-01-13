@@ -66,8 +66,8 @@ class SlackProviderHTTP(BaseProvider):
             
             def process_request():
                 try:
-                    print(f"Processing query: {query}")
-                    response = self.agent.ask(query)
+                    print(f"Processing query: {query} in thread: {channel}")
+                    response = self.agent.ask(query, thread_id=channel)
                     
                     self.app.client.chat_update(
                         channel=channel,
