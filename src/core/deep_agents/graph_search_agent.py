@@ -15,7 +15,6 @@ async def graph_search_tool(query: str) -> str:
     Returns:
         Search results as formatted text
     """
-    # Instantiate client per-call to ensure it binds to the current event loop
     graph_client = GraphitiClient()
     
     try:
@@ -25,14 +24,12 @@ async def graph_search_tool(query: str) -> str:
         if not isinstance(query, str):
             return f"Invalid query type: {type(query)}"
             
-        # Initialize and search
         await graph_client.initialize()
         search_results = await graph_client.search(query)
         
     except Exception as e:
         return f"Graph search error: {str(e)}"
     finally:
-        # Best effort cleanup
         try:
             if graph_client:
                 await graph_client.close()
@@ -42,7 +39,6 @@ async def graph_search_tool(query: str) -> str:
     if not search_results:
         return "No results found in the knowledge graph."
     
-    # Format results as readable text
     formatted_results = []
     for r in search_results:
         if isinstance(r, dict):
@@ -57,7 +53,6 @@ async def graph_search_tool(query: str) -> str:
     print(f"\n--- DEBUG: Graph Search Output ---\nQuery: {query}\nResults:\n{result_text}\n----------------------------------\n")
     return result_text
 
-# Create the graph_search subagent
 graph_search_subagent = {
     "name": "graph_search",
     "description": "Searches the knowledge graph to find facts, relationships, and temporal information about entities.",

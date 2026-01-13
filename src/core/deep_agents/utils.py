@@ -31,39 +31,41 @@ def get_embeddings_from_provider():
     
     return embeddings
 
-def async_to_sync(async_func: Callable[..., Any]) -> Callable[..., Any]:
-    """
-    Thread-safe decorator to convert async function to sync.
-    Works in Jupyter notebooks and ThreadPoolExecutor contexts.
-    """
+def normalize_agent_response(response) -> str:
+        """
+        Normalize LangChain / LangGraph agent responses into plain text.
+        """
+        if isinstance(response, dict):
+            return handle_dict_response(response)
+        
+        content = getattr(response, "content", None)
+        if content is not None:
+            return normalize_agent_response(content)
+        
+        if isinstance(response, list):
+            return handle_list_response(response)
+        
+        return str(response).strip()
 
-    @wraps(async_func)
-    def wrapper(*args, **kwargs):
-        try:
-            # Try to get the running loop (if we're in async context)
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # No running loop - we're in a sync context or thread pool
-            loop = None
+def handle_dict_response(response: dict) -> str:
+    """Extract text from dict response."""
+    if "messages" in response and response["messages"]:
+        return normalize_agent_response(response["messages"][-1])
+    
+    if "output" in response:
+        return str(response["output"]).strip()
+    
+    return str(response).strip()
 
-        if loop is not None and loop.is_running():
-            # We're in an async context with a running loop
-            # This shouldn't happen with LangGraph subagents, but just in case
-            import nest_asyncio
-
-            nest_asyncio.apply()
-            return loop.run_until_complete(async_func(*args, **kwargs))
+def handle_list_response(response: list) -> str:
+    """Extract text from list response."""
+    parts = []
+    for item in response:
+        if isinstance(item, dict) and item.get("type") == "text" and "text" in item:
+            parts.append(item["text"])
         else:
-            # We're in a sync context or thread pool - create new event loop
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            try:
-                return new_loop.run_until_complete(async_func(*args, **kwargs))
-            finally:
-                new_loop.close()
-                asyncio.set_event_loop(None)
-
-    return wrapper
+            parts.append(str(item))
+    return "".join(parts).strip()
 
 GRAPH_SEARCH_SUBAGENT = {
     "name": "graph_search",

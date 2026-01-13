@@ -11,6 +11,7 @@ from graphiti_core.llm_client.config import LLMConfig
 from graphiti_core.llm_client.gemini_client import GeminiClient
 from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
 from graphiti_core.cross_encoder.gemini_reranker_client import GeminiRerankerClient
+from graphiti_core.nodes import EpisodeType
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -33,7 +34,6 @@ class GraphitiClient:
             neo4j_user: Neo4j username
             neo4j_password: Neo4j password
         """
-        # Neo4j configuration
         self.neo4j_uri = neo4j_uri or os.getenv("NEO4J_URI")
         self.neo4j_user = neo4j_user or os.getenv("NEO4J_USER", "neo4j")
         self.neo4j_password = neo4j_password or os.getenv("NEO4J_PASSWORD")
@@ -41,7 +41,6 @@ class GraphitiClient:
         if not self.neo4j_password:
             raise ValueError("NEO4J_PASSWORD environment variable not set")
 
-        # LLM configuration
         self.llm_base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
         self.llm_api_key = os.getenv("LLM_API_KEY")
         self.llm_choice = os.getenv("MODEL_NAME", "gpt-4.1-mini")
@@ -49,7 +48,6 @@ class GraphitiClient:
         if not self.llm_api_key:
             raise ValueError("LLM_API_KEY environment variable not set")
             
-        # Embedding configuration
         self.embedding_base_url = os.getenv(
             "EMBEDDING_BASE_URL", "https://api.openai.com/v1"
         )
@@ -65,16 +63,13 @@ class GraphitiClient:
 
     async def initialize(self):
         """Initialize Graphiti client."""
-        # Check if we are in a new event loop
         try:
             current_loop = asyncio.get_running_loop()
             if self._initialized and self._loop is not None and current_loop is not self._loop:
                 logger.warning("Event loop changed, re-initializing Graphiti client")
-                # We cannot await close() on the old loop if it is closed, so we just reset
                 self.graphiti = None
                 self._initialized = False
         except RuntimeError:
-            # Should not happen if calling from async context
             pass
 
         if self._initialized:
@@ -83,18 +78,15 @@ class GraphitiClient:
         try:
             self._loop = asyncio.get_running_loop()
 
-            # Create LLMConfig
             llm_config = LLMConfig(
                 api_key=self.llm_api_key,
                 model=self.llm_choice,
-                small_model=self.llm_choice,  # Can be the same as main model
+                small_model=self.llm_choice,  
                 base_url=self.llm_base_url,
             )
 
-            # Create OpenAI LLM client
             llm_client = GeminiClient(config=llm_config)
 
-            # Create OpenAI embedder
             embedder = GeminiEmbedder(
                 config=GeminiEmbedderConfig(
                     api_key=self.embedding_api_key,
@@ -104,10 +96,8 @@ class GraphitiClient:
                 )
             )
 
-            # Create Reranker
             reranker = GeminiRerankerClient(client=llm_client, config=llm_config)
 
-            # Initialize Graphiti with custom clients
             self.graphiti = Graphiti(
                 self.neo4j_uri,
                 self.neo4j_user,
@@ -117,7 +107,6 @@ class GraphitiClient:
                 cross_encoder=reranker
             )
 
-            # Build indices and constraints
             await self.graphiti.build_indices_and_constraints()
 
             self._initialized = True
@@ -137,42 +126,6 @@ class GraphitiClient:
             self._initialized = False
             logger.info("Graphiti client closed")
 
-    async def add_episode(
-        self,
-        episode_id: str,
-        content: str,
-        source: str,
-        timestamp: Optional[datetime] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-    ):
-        """
-        Add an episode to the knowledge graph.
-
-        Args:
-            episode_id: Unique episode identifier
-            content: Episode content
-            source: Source of the content
-            timestamp: Episode timestamp
-            metadata: Additional metadata
-        """
-        if not self._initialized:
-            await self.initialize()
-
-        episode_timestamp = timestamp or datetime.now(timezone.utc)
-
-        # Import EpisodeType for proper source handling
-        from graphiti_core.nodes import EpisodeType
-
-        await self.graphiti.add_episode(
-            name=episode_id,
-            episode_body=content,
-            source=EpisodeType.text,  # Always use text type for our content
-            source_description=source,
-            reference_time=episode_timestamp,
-        )
-
-        logger.info(f"Added episode {episode_id} to knowledge graph")
-
     async def search(
         self, query: str
     ) -> List[Dict[str, Any]]:
@@ -191,10 +144,8 @@ class GraphitiClient:
             await self.initialize()
 
         try:
-            # Use Graphiti's search method (simplified parameters)
             results = await self.graphiti.search(query)
 
-            # Convert results to dictionaries
             return [
                 {
                     "fact": result.fact,
@@ -242,10 +193,8 @@ class GraphitiClient:
         if not self._initialized:
             await self.initialize()
 
-        # Use Graphiti search to find related information about the entity
         results = await self.graphiti.search(f"relationships involving {entity_name}")
 
-        # Extract entity information from the search results
         related_entities = set()
         facts = []
 
@@ -262,7 +211,6 @@ class GraphitiClient:
                 }
             )
 
-            # Simple entity extraction from fact text (could be enhanced)
             if entity_name.lower() in result.fact.lower():
                 related_entities.add(entity_name)
 
@@ -290,7 +238,6 @@ class GraphitiClient:
         if not self._initialized:
             await self.initialize()
 
-        # Search for temporal information about the entity
         results = await self.graphiti.search(f"timeline history of {entity_name}")
 
         timeline = []
@@ -312,7 +259,6 @@ class GraphitiClient:
                 }
             )
 
-        # Sort by valid_at if available
         timeline.sort(key=lambda x: x.get("valid_at") or "", reverse=True)
 
         return timeline
@@ -327,8 +273,6 @@ class GraphitiClient:
         if not self._initialized:
             await self.initialize()
 
-        # For now, return a simple search to verify the graph is working
-        # More detailed statistics would require direct Neo4j access
         try:
             test_results = await self.graphiti.search("test")
             return {
@@ -345,16 +289,13 @@ class GraphitiClient:
             await self.initialize()
 
         try:
-            # Use Graphiti's proper clear_data function with the driver
             await clear_data(self.graphiti.driver)
             logger.warning("Cleared all data from knowledge graph")
         except Exception as e:
             logger.error(f"Failed to clear graph using clear_data: {e}")
-            # Fallback: Close and reinitialize (this will create fresh indices)
             if self.graphiti:
                 await self.graphiti.close()
 
-            # Create OpenAI-compatible clients for reinitialization
             llm_config = LLMConfig(
                 api_key=self.llm_api_key,
                 model=self.llm_choice,
