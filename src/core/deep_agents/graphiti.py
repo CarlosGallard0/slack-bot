@@ -111,9 +111,6 @@ class GraphitiClient:
                 self.neo4j_password,
                 llm_client=llm_client,
                 embedder=embedder,
-                cross_encoder=GeminiRerankerClient(
-                    client=llm_client, config=llm_config
-                ),
             )
 
             # Build indices and constraints
