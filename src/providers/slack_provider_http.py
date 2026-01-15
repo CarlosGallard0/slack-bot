@@ -62,10 +62,13 @@ class SlackProviderHTTP(BaseProvider):
 
     def respond_with_thinking(self, channel, query, say):
         try:
-            initial_message = say("Thinking...")
-            
+            # Start the processing thread immediately to prevent blocking the Slack ACK
             def process_request():
+                initial_message = None
                 try:
+                    # Move the initial response inside the thread to avoid blocking
+                    initial_message = say("Thinking...")
+                    
                     print(f"Processing query: {query} in thread: {channel}")
                     response = self.agent.ask(query, thread_id=channel)
                     
@@ -76,11 +79,18 @@ class SlackProviderHTTP(BaseProvider):
                     )
                 except Exception as e:
                     print(f"Error in response flow: {e}")
-                    self.app.client.chat_update(
-                        channel=channel,
-                        ts=initial_message["ts"],
-                        text=f"Sorry, I ran into an error: {e}"
-                    )
+                    error_msg = f"Sorry, I ran into an error: {e}"
+                    if initial_message:
+                        self.app.client.chat_update(
+                            channel=channel,
+                            ts=initial_message["ts"],
+                            text=error_msg
+                        )
+                    else:
+                        try:
+                            say(error_msg)
+                        except Exception as say_error:
+                             print(f"Could not send error message: {say_error}")
 
             threading.Thread(target=process_request).start()
 
