@@ -4,7 +4,7 @@ from flask import Flask, request
 from slack_bolt import App
 from slack_bolt.adapter.flask import SlackRequestHandler
 from src.providers.base import BaseProvider
-from src.core.deep_agent import AgentCore
+from src.core.deep_agents.deep_agent import AgentCore
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
@@ -62,11 +62,9 @@ class SlackProviderHTTP(BaseProvider):
 
     def respond_with_thinking(self, channel, query, say):
         try:
-            # Start the processing thread immediately to prevent blocking the Slack ACK
             def process_request():
                 initial_message = None
                 try:
-                    # Move the initial response inside the thread to avoid blocking
                     initial_message = say("Thinking...")
                     
                     print(f"Processing query: {query} in thread: {channel}")
@@ -75,15 +73,11 @@ class SlackProviderHTTP(BaseProvider):
                     answer = response
                     logs = ""
                     
-                    # Handle structured response (dict) vs string
                     if isinstance(response, dict):
                         answer = response.get("answer", "")
                         logs = response.get("logs", "")
                     
-                    # 1. Post logs to thread
                     if logs and initial_message:
-                        # Split logs into chunks of ~3000 chars to avoid msg_too_long
-                        # Wrapping in code block for formatting
                         log_chunks = [logs[i:i+2900] for i in range(0, len(logs), 2900)]
                         for chunk in log_chunks:
                             self.app.client.chat_postMessage(
@@ -92,19 +86,15 @@ class SlackProviderHTTP(BaseProvider):
                                 thread_ts=initial_message["ts"]
                             )
 
-                    # 2. Update main message (and thread overflow)
                     if answer:
-                        # Split answer into chunks
                         answer_chunks = [answer[i:i+3000] for i in range(0, len(answer), 3000)]
                         
-                        # Update the initial "Thinking..." message with the first chunk
                         self.app.client.chat_update(
                             channel=channel,
                             ts=initial_message["ts"],
                             text=answer_chunks[0]
                         )
                         
-                        # Post remaining chunks to the thread
                         for chunk in answer_chunks[1:]:
                             self.app.client.chat_postMessage(
                                 channel=channel,

@@ -1,15 +1,15 @@
 import os
 import asyncio
-from typing import List
 from dotenv import load_dotenv
-
+import io
+import contextlib
 from langchain.messages import SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
 from langchain_google_genai import ChatGoogleGenerativeAI
-from src.core.deep_agents.graphiti import GraphitiClient
+from src.rag.graphiti import GraphitiClient
 import nest_asyncio
-
+from src.core.deterministic_agent.utils import evaluate_query_results, off_topic_response
 from src.core.deterministic_agent.utils import GeneratedQueries, SelectedIndexes, State, WorkerInput, QueryEvaluation
 
 load_dotenv(override=True)
@@ -24,23 +24,10 @@ model = ChatGoogleGenerativeAI(
 
 graphitiClient = GraphitiClient()
 
-def evaluate_query_results(results: List[dict], min_relevant: int = 2, score_threshold: float = 0.6) -> QueryEvaluation:
-    """Evaluate if query results are relevant based on scores"""
-    relevant_results = [r for r in results if r['score'] < score_threshold]
-    
-    return QueryEvaluation(
-        is_relevant=len(relevant_results) >= min_relevant,
-        relevant_chunk_count=len(relevant_results)
-    )
-
 def filterer(state: State):
     """
     Agent that determines if the user question is related to the medical field.
     """
-    print("\n" + "="*80)
-    print("FILTERER: Checking if question is medical-related")
-    print("="*80)
-
     prompt = [
         SystemMessage(content="""You are a medical domain classifier. 
         Determine if the user's question is related to health, medicine, biology, 
@@ -62,17 +49,12 @@ def filterer(state: State):
         
     return {"is_medical": is_medical}
 
-def off_topic_response(state: State):
-    return {"final_timeline": ["I'm sorry, I can only answer questions related to the medical field."]}
 
 def orchestrator(state: State):
     """
     Orchestrator that analyzes the user question and available indexes,
     then selects which indexes should be processed by workers.
     """
-    print("\n" + "="*80)
-    print("ORCHESTRATOR: Analyzing question and selecting indexes")
-    print("="*80)
     
     index_selector = model.with_structured_output(SelectedIndexes)
     
@@ -103,10 +85,6 @@ Available Indexes:
 Select the most relevant indexes to answer this question.""")
     ])
     
-    print(f"\n✓ Selected {len(selected.indexes)} indexes for processing:")
-    for idx in selected.indexes:
-        print(f"  • {idx.index_id}: {idx.relevance_reasoning}")
-    
     return {"selected_indexes": selected.indexes}
 
 async def worker_node(state: WorkerInput):
@@ -122,19 +100,11 @@ async def worker_node(state: WorkerInput):
     """
     index_id = state['index_metadata'].index_id
     
-    print("\n" + "-"*80)
-    print(f"WORKER [{index_id}]: Starting pipeline")
-    print("-"*80)
-    
-    print(f"\n[{index_id}] Step 1: Initializing Graphiti client...")
-    
     try:
         await graphitiClient.initialize()
     except Exception as e:
         print(f"  ✗ Failed to initialize Graphiti client: {e}")
         return {"worker_outputs": []}
-    
-    print(f"\n[{index_id}] Step 2: Generating search queries...")
     
     query_gen_llm = model.with_structured_output(GeneratedQueries)
     
@@ -155,13 +125,6 @@ Year: {state['index_metadata'].year}
 Generate 3-5 search queries for this index.""")
     ])
     
-    print(f"  ✓ Generated {len(generated.queries)} queries:")
-    for i, q in enumerate(generated.queries, 1):
-        print(f"    {i}. {q.query}")
-    
-    # ========== STEP 3: EXECUTE QUERIES AND RETRIEVE CHUNKS ==========
-    print(f"\n[{index_id}] Step 3: Executing queries against Graphiti...")
-    
     query_strings = [q.query for q in generated.queries]
     all_results = []
     
@@ -177,24 +140,20 @@ Generate 3-5 search queries for this index.""")
                     "metadata": {
                         "source": "Graphiti Knowledge Graph",
                         "topic": "General", 
-                        "year": state['index_metadata'].year # Fallback to index year
+                        "year": state['index_metadata'].year 
                     },
                     "score": score,
                     "query": query
                 })
         except Exception as e:
             print(f"  ✗ Error searching for '{query}': {e}")
-            
-    print(f"  ✓ Retrieved {len(all_results)} total chunks from {len(query_strings)} queries")
-    
+
     results_by_query = {}
     for result in all_results:
         query = result['query']
         if query not in results_by_query:
             results_by_query[query] = []
         results_by_query[query].append(result)
-    
-    print(f"\n[{index_id}] Step 4: Evaluating query quality...")
     
     evaluated_queries = []
     relevant_chunks = []
@@ -206,19 +165,11 @@ Generate 3-5 search queries for this index.""")
         evaluation = evaluate_query_results(results, min_relevant=2, score_threshold=0.6)
         
         if evaluation.is_relevant:
-            print(f"  ✓ '{query_str}' - {evaluation.relevant_chunk_count} relevant chunks")
             evaluated_queries.append(query_obj)
             relevant_chunks.extend([r for r in results if r['score'] < 0.6])
-        else:
-            print(f"  ✗ '{query_str}' - {evaluation.relevant_chunk_count} relevant chunks (filtered out)")
-    
-    print(f"\n  → {len(evaluated_queries)}/{len(generated.queries)} queries passed evaluation")
-    
+
     if len(evaluated_queries) == 0:
-        print("  ✗ No queries passed evaluation, skipping this worker")
         return {"worker_outputs": []}
-    
-    print(f"\n[{index_id}] Step 5: Deduplicating chunks...")
     
     seen_texts = set()
     unique_chunks = []
@@ -228,11 +179,7 @@ Generate 3-5 search queries for this index.""")
             seen_texts.add(text)
             unique_chunks.append(chunk)
     
-    print(f"  ✓ {len(unique_chunks)} unique chunks (removed {len(relevant_chunks) - len(unique_chunks)} duplicates)")
-    
     unique_chunks.sort(key=lambda x: x['score'])
-    
-    print(f"\n[{index_id}] Step 6: Generating summary from retrieved documents...")
     
     top_chunks = unique_chunks[:10]
     chunks_context = "\n\n---\n\n".join([
@@ -257,18 +204,15 @@ Generate 3-5 search queries for this index.""")
         Do NOT include a references section - that will be added separately."""),
         HumanMessage(content=f"""User Question: {state['user_question']}
 
-Retrieved Documents from {state['index_metadata'].title} ({state['index_metadata'].year}):
+        Retrieved Documents from {state['index_metadata'].title} ({state['index_metadata'].year}):
 
-{chunks_context}
+        {chunks_context}
 
-Create a summary that answers the user's question based on these documents.""")
-    ])
+        Create a summary that answers the user's question based on these documents.""")
+            ])
     
     summary = summary_response.content
-    print(f"  ✓ Summary generated ({len(summary)} characters)")
-    
-    print(f"\n[{index_id}] Step 7: Collecting source references...")
-    
+
     sources_used = []
     seen_sources = set()
     
@@ -283,8 +227,7 @@ Create a summary that answers the user's question based on these documents.""")
                 'score': chunk['score']
             })
     
-    print(f"  ✓ {len(sources_used)} unique sources referenced")
-    
+
     worker_output = {
         "index_id": state["index_metadata"].index_id,
         "title": state["index_metadata"].title,
@@ -296,14 +239,6 @@ Create a summary that answers the user's question based on these documents.""")
         "sources": sources_used 
     }
     
-    print("\n" + "-"*80)
-    print(f"WORKER [{index_id}]: Pipeline complete")
-    print(f"  • Queries: {len(evaluated_queries)}/{len(generated.queries)} passed")
-    print(f"  • Chunks: {len(unique_chunks)} retrieved")
-    print(f"  • Sources: {len(sources_used)} unique")
-    print(f"  • Summary: {len(summary)} characters")
-    print("-"*80)
-    
     return {"worker_outputs": [worker_output]}
 
 
@@ -312,9 +247,6 @@ def synthesizer(state: State):
     Final node that takes all worker outputs and produces the final timeline 
     with consistent section formatting throughout.
     """
-    print("\n" + "="*80)
-    print("SYNTHESIZER: Creating final timeline with consistent formatting")
-    print("="*80)
     
     sorted_outputs = sorted(state["worker_outputs"], key=lambda x: x["year"])
     
@@ -371,16 +303,14 @@ def synthesizer(state: State):
         Do NOT include limitations or references sections - those will be added separately."""),
         HumanMessage(content=f"""User Question: {state['user_question']}
 
-Research gathered from {len(sorted_outputs)} sources:
+        Research gathered from {len(sorted_outputs)} sources:
 
-{worker_context}
+        {worker_context}
 
-Create a comprehensive timeline that synthesizes this information to answer the question.""")
-    ])
+        Create a comprehensive timeline that synthesizes this information to answer the question.""")
+            ])
     
     timeline_content = final_response.content
-    
-    print("\n✓ Generating research limitations paragraph...")
     
     indexes_used = [output['title'] for output in sorted_outputs]
     years_covered = [output['year'] for output in sorted_outputs]
@@ -405,21 +335,18 @@ Create a comprehensive timeline that synthesizes this information to answer the 
         Write 3-5 sentences as a paragraph. Do NOT include any title or heading."""),
         HumanMessage(content=f"""User Question: {state['user_question']}
 
-Research Parameters:
-- Indexes searched: {', '.join(indexes_used)}
-- Years covered: {min(years_covered)} to {max(years_covered)}
-- Total chunks retrieved: {total_chunks}
-- Queries used: {passed_queries} out of {total_queries} passed relevance filtering
+        Research Parameters:
+        - Indexes searched: {', '.join(indexes_used)}
+        - Years covered: {min(years_covered)} to {max(years_covered)}
+        - Total chunks retrieved: {total_chunks}
+        - Queries used: {passed_queries} out of {total_queries} passed relevance filtering
 
-Generate a limitations paragraph that clearly explains the scope and boundaries 
-of this research.""")
-    ])
+        Generate a limitations paragraph that clearly explains the scope and boundaries 
+        of this research.""")
+            ])
     
     limitations_content = limitations_response.content
-    print(f"  ✓ Limitations paragraph generated ({len(limitations_content)} characters)")
-    
-    print("\n✓ Building source references...")
-    
+
     references_content = "**Research Metadata:**\n"
     references_content += f"- Question: {state['user_question']}\n"
     references_content += f"- Indexes analyzed: {len(sorted_outputs)}\n"
@@ -456,13 +383,6 @@ of this research.""")
     final_output += "="*80 + "\n"
     final_output += references_content
     
-    print("\n✓ Final output created:")
-    print(f"  • Timeline: {len(timeline_content)} characters")
-    print(f"  • Limitations: {len(limitations_content)} characters")
-    print(f"  • References: {len(references_content)} characters")
-    print(f"  • Total sources: {sum(len(o['sources']) for o in sorted_outputs)}")
-    print("="*80)
-    
     return {"final_timeline": final_output}
 
 
@@ -471,10 +391,6 @@ def assign_workers(state: State):
     Conditional edge function that creates a worker for each selected index.
     Uses the Send API to dispatch work in parallel.
     """
-    print(f"\n{'='*80}")
-    print(f"Assigning {len(state['selected_indexes'])} workers")
-    print(f"{'='*80}")
-    
     index_map = {idx.index_id: idx for idx in state["available_indexes"]}
     
     return [
@@ -497,14 +413,12 @@ def build_research_timeline_graph():
     
     graph_builder = StateGraph(State)
     
-    # Add nodes
     graph_builder.add_node("filterer", filterer)
     graph_builder.add_node("orchestrator", orchestrator)
     graph_builder.add_node("off_topic", off_topic_response)
     graph_builder.add_node("worker_node", worker_node)
     graph_builder.add_node("synthesizer", synthesizer)
     
-    # Add edges
     graph_builder.add_edge(START, "filterer")
     graph_builder.add_conditional_edges(
         "filterer",
@@ -577,11 +491,7 @@ class DeterministicAgent:
             "worker_outputs": [],
             "final_timeline": ""
         }
-
-        # Invoke the graph with stdout capture
-        import io
-        import contextlib
-        
+ 
         f = io.StringIO()
         with contextlib.redirect_stdout(f):
             result = await self.graph.ainvoke(initial_state)

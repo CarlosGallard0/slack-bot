@@ -2,7 +2,7 @@ import os
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from src.providers.base import BaseProvider
-from src.core.agent import AgentCore
+from src.core.regular_agent.agent import AgentCore
 
 class SlackProvider(BaseProvider):
     def __init__(self, agent: AgentCore):
@@ -47,14 +47,11 @@ class SlackProvider(BaseProvider):
             answer = response
             logs = ""
             
-            # Handle structured response (dict) vs string
             if isinstance(response, dict):
                 answer = response.get("answer", "")
                 logs = response.get("logs", "")
             
-            # 1. Post logs to thread
             if logs and initial_message:
-                # Split logs into chunks of ~3000 chars
                 log_chunks = [logs[i:i+2900] for i in range(0, len(logs), 2900)]
                 for chunk in log_chunks:
                     self.app.client.chat_postMessage(
@@ -63,19 +60,15 @@ class SlackProvider(BaseProvider):
                         thread_ts=initial_message["ts"]
                     )
 
-            # 2. Update main message (and thread overflow)
             if answer:
-                # Split answer into chunks
                 answer_chunks = [answer[i:i+3000] for i in range(0, len(answer), 3000)]
                 
-                # Update the initial "Thinking..." message with the first chunk
                 self.app.client.chat_update(
                     channel=channel,
                     ts=initial_message["ts"],
                     text=answer_chunks[0]
                 )
                 
-                # Post remaining chunks to the thread
                 for chunk in answer_chunks[1:]:
                     self.app.client.chat_postMessage(
                         channel=channel,

@@ -59,3 +59,16 @@ class WorkerInput(TypedDict):
     user_question: str
     index_metadata: IndexMetadata
     selected_index: SelectedIndex
+
+
+def evaluate_query_results(results: List[dict], min_relevant: int = 2, score_threshold: float = 0.6) -> QueryEvaluation:
+    """Evaluate if query results are relevant based on scores"""
+    relevant_results = [r for r in results if r['score'] < score_threshold]
+
+    return QueryEvaluation(
+        is_relevant=len(relevant_results) >= min_relevant,
+        relevant_chunk_count=len(relevant_results)
+    )
+
+def off_topic_response(state: State):
+    return {"final_timeline": ["I'm sorry, I can only answer questions related to the medical field."]}
