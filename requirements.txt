@@ -15,3 +15,4 @@ deepagents
 langgraph
 gunicorn
 graphiti-core
+langchain-chroma

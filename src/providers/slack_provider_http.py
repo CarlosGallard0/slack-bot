@@ -72,11 +72,51 @@ class SlackProviderHTTP(BaseProvider):
                     print(f"Processing query: {query} in thread: {channel}")
                     response = self.agent.ask(query, thread_id=channel)
                     
-                    self.app.client.chat_update(
-                        channel=channel,
-                        ts=initial_message["ts"],
-                        text=response
-                    )
+                    answer = response
+                    logs = ""
+                    
+                    # Handle structured response (dict) vs string
+                    if isinstance(response, dict):
+                        answer = response.get("answer", "")
+                        logs = response.get("logs", "")
+                    
+                    # 1. Post logs to thread
+                    if logs and initial_message:
+                        # Split logs into chunks of ~3000 chars to avoid msg_too_long
+                        # Wrapping in code block for formatting
+                        log_chunks = [logs[i:i+2900] for i in range(0, len(logs), 2900)]
+                        for chunk in log_chunks:
+                            self.app.client.chat_postMessage(
+                                channel=channel,
+                                text=f"```{chunk}```",
+                                thread_ts=initial_message["ts"]
+                            )
+
+                    # 2. Update main message (and thread overflow)
+                    if answer:
+                        # Split answer into chunks
+                        answer_chunks = [answer[i:i+3000] for i in range(0, len(answer), 3000)]
+                        
+                        # Update the initial "Thinking..." message with the first chunk
+                        self.app.client.chat_update(
+                            channel=channel,
+                            ts=initial_message["ts"],
+                            text=answer_chunks[0]
+                        )
+                        
+                        # Post remaining chunks to the thread
+                        for chunk in answer_chunks[1:]:
+                            self.app.client.chat_postMessage(
+                                channel=channel,
+                                text=chunk,
+                                thread_ts=initial_message["ts"]
+                            )
+                    else:
+                        self.app.client.chat_update(
+                            channel=channel,
+                            ts=initial_message["ts"],
+                            text="No response generated."
+                        )
                 except Exception as e:
                     print(f"Error in response flow: {e}")
                     error_msg = f"Sorry, I ran into an error: {e}"

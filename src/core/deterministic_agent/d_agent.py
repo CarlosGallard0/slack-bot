@@ -538,22 +538,22 @@ class DeterministicAgent:
         except RuntimeError:
             self._loop = None
 
-    def ask(self, query: str) -> str:
+    def ask(self, query: str, thread_id: str = None) -> str:
         """
         Synchronous wrapper for ask_async
         """
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(self.ask_async(query))
+            return asyncio.run(self.ask_async(query, thread_id))
         else:
             try:
                 nest_asyncio.apply()
             except ImportError:
                 pass
-            return loop.run_until_complete(self.ask_async(query))
+            return loop.run_until_complete(self.ask_async(query, thread_id))
 
-    async def ask_async(self, query: str) -> str:
+    async def ask_async(self, query: str, thread_id: str = None) -> str:
         """
         Process a query using the deterministic agent graph.
         Returns the final timeline as a string.
@@ -578,6 +578,17 @@ class DeterministicAgent:
             "final_timeline": ""
         }
 
-        result = await self.graph.ainvoke(initial_state)
+        # Invoke the graph with stdout capture
+        import io
+        import contextlib
         
-        return result.get("final_timeline", "No response generated.")
+        f = io.StringIO()
+        with contextlib.redirect_stdout(f):
+            result = await self.graph.ainvoke(initial_state)
+        
+        logs = f.getvalue()
+        
+        return {
+            "answer": result.get("final_timeline", "No response generated."),
+            "logs": logs
+        }

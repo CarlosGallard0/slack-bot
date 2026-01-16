@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
 from src.core.deep_agent import AgentCore
+from src.core.deterministic_agent.d_agent import DeterministicAgent
 from src.providers.slack_provider import SlackProvider
 from src.providers.slack_provider_http import SlackProviderHTTP
 from src.providers.teams_provider import TeamsProvider
@@ -8,7 +9,7 @@ from src.providers.teams_provider import TeamsProvider
 def main():
     load_dotenv()
 
-    agent = AgentCore()
+    agent = DeterministicAgent()
     
     provider_type = os.environ.get("BOT_PROVIDER", "slack").lower()
     slack_mode = os.environ.get("SLACK_MODE", "socket").lower()  # socket or http
