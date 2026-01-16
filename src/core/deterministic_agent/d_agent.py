@@ -41,7 +41,6 @@ def filterer(state: State):
     print("FILTERER: Checking if question is medical-related")
     print("="*80)
 
-    # Simple classification prompt
     prompt = [
         SystemMessage(content="""You are a medical domain classifier. 
         Determine if the user's question is related to health, medicine, biology, 
@@ -66,10 +65,6 @@ def filterer(state: State):
 def off_topic_response(state: State):
     return {"final_timeline": ["I'm sorry, I can only answer questions related to the medical field."]}
 
-# ============================================================================
-# ORCHESTRATOR NODE
-# ============================================================================
-
 def orchestrator(state: State):
     """
     Orchestrator that analyzes the user question and available indexes,
@@ -79,10 +74,8 @@ def orchestrator(state: State):
     print("ORCHESTRATOR: Analyzing question and selecting indexes")
     print("="*80)
     
-    # Create the LLM with structured output for index selection
     index_selector = model.with_structured_output(SelectedIndexes)
     
-    # Format available indexes for the prompt
     indexes_info = "\n\n".join([
         f"Index ID: {idx.index_id}\n"
         f"Title: {idx.title}\n"
@@ -91,7 +84,6 @@ def orchestrator(state: State):
         for idx in state["available_indexes"]
     ])
     
-    # Call LLM to select relevant indexes
     selected = index_selector.invoke([
         SystemMessage(content="""You are an expert research assistant. 
         Analyze the user's question and select which indexes from the available 
@@ -117,11 +109,6 @@ Select the most relevant indexes to answer this question.""")
     
     return {"selected_indexes": selected.indexes}
 
-
-# ============================================================================
-# WORKER NODE (WITH GRAPHITI INTEGRATION)
-# ============================================================================
-
 async def worker_node(state: WorkerInput):
     """
     Complete worker pipeline that processes a single index:
@@ -139,17 +126,14 @@ async def worker_node(state: WorkerInput):
     print(f"WORKER [{index_id}]: Starting pipeline")
     print("-"*80)
     
-    # ========== STEP 1: INITIALIZE GRAPHITI ==========
     print(f"\n[{index_id}] Step 1: Initializing Graphiti client...")
     
     try:
         await graphitiClient.initialize()
-        # Verify connectivity if possible, or just proceed
     except Exception as e:
         print(f"  ✗ Failed to initialize Graphiti client: {e}")
         return {"worker_outputs": []}
     
-    # ========== STEP 2: QUERY GENERATION ==========
     print(f"\n[{index_id}] Step 2: Generating search queries...")
     
     query_gen_llm = model.with_structured_output(GeneratedQueries)
@@ -183,15 +167,9 @@ Generate 3-5 search queries for this index.""")
     
     for query in query_strings:
         try:
-            # Search Graphiti using the wrapper client
-            # Returns List[Dict[str, Any]] where each dict has a 'fact' key
             edges = await graphitiClient.search(query)
             
-            # Map graph results to result format
-            # Limit to top 5
             for i, edge in enumerate(edges[:5]):
-                # Create a simulated score based on rank (0.1 best, +0.05 per rank)
-                # to satisfy the "lower is better" logic of existing evaluator (< 0.6)
                 score = 0.1 + (i * 0.05)
                 
                 all_results.append({
@@ -209,7 +187,6 @@ Generate 3-5 search queries for this index.""")
             
     print(f"  ✓ Retrieved {len(all_results)} total chunks from {len(query_strings)} queries")
     
-    # Group results by query
     results_by_query = {}
     for result in all_results:
         query = result['query']
@@ -217,7 +194,6 @@ Generate 3-5 search queries for this index.""")
             results_by_query[query] = []
         results_by_query[query].append(result)
     
-    # ========== STEP 4: EVALUATE QUERIES ==========
     print(f"\n[{index_id}] Step 4: Evaluating query quality...")
     
     evaluated_queries = []
@@ -242,7 +218,6 @@ Generate 3-5 search queries for this index.""")
         print("  ✗ No queries passed evaluation, skipping this worker")
         return {"worker_outputs": []}
     
-    # ========== STEP 5: DEDUPLICATE CHUNKS ==========
     print(f"\n[{index_id}] Step 5: Deduplicating chunks...")
     
     seen_texts = set()
@@ -255,13 +230,10 @@ Generate 3-5 search queries for this index.""")
     
     print(f"  ✓ {len(unique_chunks)} unique chunks (removed {len(relevant_chunks) - len(unique_chunks)} duplicates)")
     
-    # Sort by score (most relevant first)
     unique_chunks.sort(key=lambda x: x['score'])
     
-    # ========== STEP 6: GENERATE SUMMARY FROM CHUNKS ==========
     print(f"\n[{index_id}] Step 6: Generating summary from retrieved documents...")
     
-    # Prepare context from top chunks (limit to avoid token overflow)
     top_chunks = unique_chunks[:10]
     chunks_context = "\n\n---\n\n".join([
         f"Source: {chunk['metadata']['source']}\n"
@@ -271,7 +243,6 @@ Generate 3-5 search queries for this index.""")
         for chunk in top_chunks
     ])
     
-    # Use LLM to create summary
     summary_response = model.invoke([
         SystemMessage(content="""You are an expert research assistant. 
         Create a focused summary of the provided documents that directly answers 
@@ -296,10 +267,8 @@ Create a summary that answers the user's question based on these documents.""")
     summary = summary_response.content
     print(f"  ✓ Summary generated ({len(summary)} characters)")
     
-    # ========== STEP 7: COLLECT SOURCE REFERENCES ==========
     print(f"\n[{index_id}] Step 7: Collecting source references...")
     
-    # Get unique sources used
     sources_used = []
     seen_sources = set()
     
@@ -316,7 +285,6 @@ Create a summary that answers the user's question based on these documents.""")
     
     print(f"  ✓ {len(sources_used)} unique sources referenced")
     
-    # ========== STEP 8: PREPARE WORKER OUTPUT ==========
     worker_output = {
         "index_id": state["index_metadata"].index_id,
         "title": state["index_metadata"].title,
@@ -325,7 +293,7 @@ Create a summary that answers the user's question based on these documents.""")
         "queries_generated": len(generated.queries),
         "queries_passed": len(evaluated_queries),
         "chunks_retrieved": len(unique_chunks),
-        "sources": sources_used  # Include source references
+        "sources": sources_used 
     }
     
     print("\n" + "-"*80)
@@ -339,10 +307,6 @@ Create a summary that answers the user's question based on these documents.""")
     return {"worker_outputs": [worker_output]}
 
 
-# ============================================================================
-# SYNTHESIZER NODE (WITH SOURCE REFERENCES)
-# ============================================================================
-
 def synthesizer(state: State):
     """
     Final node that takes all worker outputs and produces the final timeline 
@@ -352,10 +316,8 @@ def synthesizer(state: State):
     print("SYNTHESIZER: Creating final timeline with consistent formatting")
     print("="*80)
     
-    # Sort worker outputs by year
     sorted_outputs = sorted(state["worker_outputs"], key=lambda x: x["year"])
     
-    # ========== HANDLE CASE WHERE NO WORKERS RETURNED RESULTS ==========
     if not sorted_outputs:
         print("\n✗ No workers returned results - cannot generate timeline")
         error_message = ("="*80 + "\n" +
@@ -381,7 +343,6 @@ def synthesizer(state: State):
                         "No sources were retrieved for this query.\n")
         return {"final_timeline": error_message}
     
-    # Prepare context for LLM
     worker_context = "\n\n".join([
         f"=== {output['title']} ({output['year']}) ===\n"
         f"Index: {output['index_id']}\n"
@@ -392,7 +353,6 @@ def synthesizer(state: State):
         for output in sorted_outputs
     ])
     
-    # Use LLM to create final synthesis
     print("\n✓ Synthesizing information from all sources...")
     
     final_response = model.invoke([
@@ -420,10 +380,8 @@ Create a comprehensive timeline that synthesizes this information to answer the 
     
     timeline_content = final_response.content
     
-    # ========== GENERATE LIMITATIONS PARAGRAPH ==========
     print("\n✓ Generating research limitations paragraph...")
     
-    # Prepare metadata for limitations analysis
     indexes_used = [output['title'] for output in sorted_outputs]
     years_covered = [output['year'] for output in sorted_outputs]
     total_chunks = sum(o['chunks_retrieved'] for o in sorted_outputs)
@@ -460,7 +418,6 @@ of this research.""")
     limitations_content = limitations_response.content
     print(f"  ✓ Limitations paragraph generated ({len(limitations_content)} characters)")
     
-    # ========== BUILD REFERENCES CONTENT ==========
     print("\n✓ Building source references...")
     
     references_content = "**Research Metadata:**\n"
@@ -470,7 +427,6 @@ of this research.""")
     references_content += f"- Query success rate: {passed_queries}/{total_queries} ({passed_queries/total_queries:.1%})\n"
     references_content += f"- Years covered: {min(years_covered)} - {max(years_covered)}\n\n"
     
-    # Add sources by index
     for output in sorted_outputs:
         references_content += f"**{output['title']} ({output['year']})**\n"
         references_content += f"Index ID: {output['index_id']}\n"
@@ -484,9 +440,6 @@ of this research.""")
                 references_content += f"Relevance: {(1 - source['score']):.1%})\n"
         
         references_content += "\n"
-    
-    # ========== FORMAT ALL SECTIONS CONSISTENTLY ==========
-    # Each section: equals + title + equals + content + equals
     
     final_output = "="*80 + "\n"
     final_output += "TIMELINE\n"
@@ -513,10 +466,6 @@ of this research.""")
     return {"final_timeline": final_output}
 
 
-# ============================================================================
-# CONDITIONAL EDGE: ASSIGN WORKERS
-# ============================================================================
-
 def assign_workers(state: State):
     """
     Conditional edge function that creates a worker for each selected index.
@@ -526,10 +475,8 @@ def assign_workers(state: State):
     print(f"Assigning {len(state['selected_indexes'])} workers")
     print(f"{'='*80}")
     
-    # Create a mapping of index_id to full metadata
     index_map = {idx.index_id: idx for idx in state["available_indexes"]}
     
-    # Create a Send for each selected index
     return [
         Send("worker_node", {
             "user_question": state["user_question"],
@@ -540,7 +487,6 @@ def assign_workers(state: State):
 
 
 def route_after_filter(state: State):
-    # This function determines the next step
     if state["is_medical"]:
         return "orchestrator"
     return "off_topic"
@@ -549,7 +495,6 @@ def route_after_filter(state: State):
 def build_research_timeline_graph():
     """Build and compile the complete research timeline graph"""
     
-    # Build main graph
     graph_builder = StateGraph(State)
     
     # Add nodes
@@ -578,7 +523,6 @@ def build_research_timeline_graph():
     graph_builder.add_edge("worker_node", "synthesizer")
     graph_builder.add_edge("synthesizer", END)
     
-    # Compile
     return graph_builder.compile()
 
 
@@ -614,12 +558,8 @@ class DeterministicAgent:
         Process a query using the deterministic agent graph.
         Returns the final timeline as a string.
         """
-        # Create a default "Global Knowledge" index context 
-        # since Graphiti is a unified graph but the agent expects 'indexes'
         from src.core.deterministic_agent.utils import IndexMetadata
 
-        # We mock an index to represent the Graphiti database
-        # This allows the orchestrator to 'select' it and the worker to query the graph
         default_indexes = [
             IndexMetadata(
                 index_id="graphiti_main",
@@ -638,8 +578,6 @@ class DeterministicAgent:
             "final_timeline": ""
         }
 
-        # Invoke the graph
         result = await self.graph.ainvoke(initial_state)
         
-        # Return the final timeline string
         return result.get("final_timeline", "No response generated.")
