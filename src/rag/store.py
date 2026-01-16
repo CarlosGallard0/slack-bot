@@ -1,12 +1,37 @@
 import os
+from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+load_dotenv()
+
+def get_embedding_model_from_provider():
+    provider = os.getenv("EMBEDDING_PROVIDER", "openai").lower()
+    model_name = os.getenv("EMBEDDING_MODEL")
+    embeddings = None
+
+    if provider == "openai":
+        embeddings = OpenAIEmbeddings(model=model_name) if model_name else OpenAIEmbeddings()
+    elif provider == "vertexai":
+        project_id = os.getenv("PROJECT_ID")
+        location = os.getenv("LOCATION", "us-central1")
+        api_key = os.getenv("VERTEX_API_KEY")
+        embeddings = GoogleGenerativeAIEmbeddings(
+            model=model_name if model_name else "text-embedding-005",
+            project=project_id,
+            location=location,
+            api_key=api_key
+        )
+    else:
+        raise ValueError(f"Unsupported embedding provider: {provider}")
+    return embeddings
+
 class RAGSystem:
     def __init__(self, data_path="data"):
-        self.embeddings = OpenAIEmbeddings()
+        self.embeddings = get_embedding_model_from_provider()
         self.persist_directory = "db"
         self.data_path = data_path
         self.vectorstore = None
@@ -21,12 +46,11 @@ class RAGSystem:
             self.vectorstore = Chroma(persist_directory=self.persist_directory, embedding_function=self.embeddings)
         else:
             print("Creating new vector store...")
-            self.vectorstore = self._create_vectorstore()
+            self.vectorstore = self.create_vectorstore()
 
-    def _create_vectorstore(self):
+    def create_vectorstore(self):
         if not os.path.exists(self.data_path):
             os.makedirs(self.data_path)
-            # Create a dummy file if none exists to avoid errors
             with open(os.path.join(self.data_path, "knowledge.txt"), "w") as f:
                 f.write("This is a sample knowledge base for the Slack bot.")
 
@@ -49,4 +73,5 @@ class RAGSystem:
         if not self.vectorstore:
             self.initialize()
         return self.vectorstore.as_retriever()
+
 
