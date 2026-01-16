@@ -11,7 +11,7 @@ from graphiti_core.llm_client.config import LLMConfig
 from graphiti_core.llm_client.gemini_client import GeminiClient
 from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
 from graphiti_core.cross_encoder.gemini_reranker_client import GeminiRerankerClient
-from graphiti_core.nodes import EpisodeType
+from graphiti_core.nodes import EpisodeType, EpisodicNode
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -146,6 +146,18 @@ class GraphitiClient:
         try:
             results = await self.graphiti.search(query)
 
+            # Collect all episode UUIDs
+            episode_uuids = []
+            for result in results:
+                if hasattr(result, "episodes") and result.episodes:
+                    episode_uuids.extend(result.episodes)
+
+            # Fetch episode details
+            episode_dict = {}
+            if episode_uuids:
+                episodes = await EpisodicNode.get_by_uuids(self.graphiti.driver, list(set(episode_uuids)))
+                episode_dict = {ep.uuid: ep.name for ep in episodes}
+
             return [
                 {
                     "fact": result.fact,
@@ -164,6 +176,11 @@ class GraphitiClient:
                         str(result.source_node_uuid)
                         if hasattr(result, "source_node_uuid")
                         and result.source_node_uuid
+                        else None
+                    ),
+                    "source_title": (
+                        episode_dict.get(result.episodes[0])
+                        if hasattr(result, "episodes") and result.episodes
                         else None
                     ),
                 }

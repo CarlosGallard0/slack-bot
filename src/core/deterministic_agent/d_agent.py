@@ -11,6 +11,7 @@ from src.rag.graphiti import GraphitiClient
 import nest_asyncio
 from src.core.deterministic_agent.utils import evaluate_query_results, off_topic_response
 from src.core.deterministic_agent.utils import GeneratedQueries, SelectedIndexes, State, WorkerInput, QueryEvaluation
+from src.core.deterministic_agent.utils import IndexMetadata
 
 load_dotenv(override=True)
 
@@ -41,12 +42,7 @@ def filterer(state: State):
     decision = response.content.strip().upper()
     
     is_medical = "YES" in decision
-    
-    if is_medical:
-        print("✅ Question accepted: Medical topic detected.")
-    else:
-        print("❌ Question rejected: Off-topic.")
-        
+       
     return {"is_medical": is_medical}
 
 
@@ -138,7 +134,7 @@ Generate 3-5 search queries for this index.""")
                 all_results.append({
                     "text": edge["fact"],
                     "metadata": {
-                        "source": "Graphiti Knowledge Graph",
+                        "source": edge.get("source_title", "Graphiti Knowledge Graph"),
                         "topic": "General", 
                         "year": state['index_metadata'].year 
                     },
@@ -285,29 +281,25 @@ def synthesizer(state: State):
         for output in sorted_outputs
     ])
     
-    print("\n✓ Synthesizing information from all sources...")
-    
     final_response = model.invoke([
         SystemMessage(content="""You are an expert research synthesizer.
-        Create a comprehensive timeline that answers the user's question by 
+        Create a concise timeline that answers the user's question by 
         synthesizing information from multiple sources.
         
         Your timeline should:
-        1. Present information chronologically
-        2. Highlight key developments and their significance
-        3. Show connections and progression between years
-        4. Be well-structured and easy to follow
-        5. Directly address the user's original question
+        1. Present information chronologically using bullet points
+        2. Focus only on the most critical developments
+        3. Be brief and to the point
+        4. usage of bolding for key terms
         
-        Format as a clear narrative with proper paragraphs.
-        Do NOT include limitations or references sections - those will be added separately."""),
+        Do NOT include limitations or references sections."""),
         HumanMessage(content=f"""User Question: {state['user_question']}
 
         Research gathered from {len(sorted_outputs)} sources:
 
         {worker_context}
 
-        Create a comprehensive timeline that synthesizes this information to answer the question.""")
+        Create a concise timeline that synthesizes this information.""")
             ])
     
     timeline_content = final_response.content
@@ -315,73 +307,37 @@ def synthesizer(state: State):
     indexes_used = [output['title'] for output in sorted_outputs]
     years_covered = [output['year'] for output in sorted_outputs]
     total_chunks = sum(o['chunks_retrieved'] for o in sorted_outputs)
-    total_queries = sum(o['queries_generated'] for o in sorted_outputs)
     passed_queries = sum(o['queries_passed'] for o in sorted_outputs)
     
     limitations_response = model.invoke([
-        SystemMessage(content="""You are an expert research analyst tasked with 
-        identifying and clearly communicating the limitations of research findings.
-        
-        Create a clear, honest limitations paragraph that:
-        1. Explains what data sources were used and what was NOT included
-        2. Identifies temporal limitations (which years/time periods were covered)
-        3. Mentions scope limitations (which topics/domains were searched)
-        4. Notes any quality control measures (query filtering, relevance thresholds)
-        5. Uses clear, accessible language
-        
-        Be specific about the actual indexes and years used. Make it clear this is
-        not an exhaustive search of all possible sources.
-        
-        Write 3-5 sentences as a paragraph. Do NOT include any title or heading."""),
+        SystemMessage(content="""You are an expert research analyst.
+        Create a very brief limitations statement (1-2 sentences) about the research scope.
+        Mention what years/indexes were covered.
+        Do NOT include any title or heading."""),
         HumanMessage(content=f"""User Question: {state['user_question']}
-
-        Research Parameters:
-        - Indexes searched: {', '.join(indexes_used)}
-        - Years covered: {min(years_covered)} to {max(years_covered)}
-        - Total chunks retrieved: {total_chunks}
-        - Queries used: {passed_queries} out of {total_queries} passed relevance filtering
-
-        Generate a limitations paragraph that clearly explains the scope and boundaries 
-        of this research.""")
+        
+        - Indexes: {', '.join(indexes_used)}
+        - Years: {min(years_covered)} to {max(years_covered)}
+        
+        Generate a brief limitations statement.""")
             ])
     
     limitations_content = limitations_response.content
 
-    references_content = "**Research Metadata:**\n"
-    references_content += f"- Question: {state['user_question']}\n"
-    references_content += f"- Indexes analyzed: {len(sorted_outputs)}\n"
-    references_content += f"- Total chunks retrieved: {total_chunks}\n"
-    references_content += f"- Query success rate: {passed_queries}/{total_queries} ({passed_queries/total_queries:.1%})\n"
-    references_content += f"- Years covered: {min(years_covered)} - {max(years_covered)}\n\n"
-    
+    # Simplified References
+    all_sources = set()
     for output in sorted_outputs:
-        references_content += f"**{output['title']} ({output['year']})**\n"
-        references_content += f"Index ID: {output['index_id']}\n"
-        references_content += f"Documents referenced: {len(output['sources'])}\n"
-        
-        if output['sources']:
-            references_content += "Sources:\n"
-            for i, source in enumerate(output['sources'][:5], 1):  # Limit to top 5 per index
-                references_content += f"  {i}. {source['source']} "
-                references_content += f"(Topic: {source['topic']}, "
-                references_content += f"Relevance: {(1 - source['score']):.1%})\n"
-        
-        references_content += "\n"
+        for source_info in output['sources']:
+            all_sources.add(source_info['source'])
     
-    final_output = "="*80 + "\n"
-    final_output += "TIMELINE\n"
-    final_output += "="*80 + "\n"
-    final_output += timeline_content + "\n"
-    final_output += "="*80 + "\n"
+    references_content = "*Sources:*"
+    for source in sorted(all_sources):
+        references_content += f"\n• {source}"
     
-    final_output += "RESEARCH LIMITATIONS\n"
-    final_output += "="*80 + "\n"
-    final_output += limitations_content + "\n"
-    final_output += "="*80 + "\n"
-    
-    final_output += "SOURCES & REFERENCES\n"
-    final_output += "="*80 + "\n"
-    final_output += references_content
+    # Construct concise final output
+    final_output = f"*TIMELINE*\n{timeline_content}\n\n"
+    final_output += f"*LIMITATIONS*\n{limitations_content}\n\n"
+    final_output += f"{references_content}"
     
     return {"final_timeline": final_output}
 
@@ -472,7 +428,6 @@ class DeterministicAgent:
         Process a query using the deterministic agent graph.
         Returns the final timeline as a string.
         """
-        from src.core.deterministic_agent.utils import IndexMetadata
 
         default_indexes = [
             IndexMetadata(
