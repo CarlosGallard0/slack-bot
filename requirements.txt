@@ -2,7 +2,6 @@ botbuilder-core
 aiohttp
 flask
 langchain
-langchain-chroma
 langchain-openai
 langchain-google-vertexai
 langchain-google-genai
@@ -10,11 +9,9 @@ langchain-community
 langchain-text-splitters
 slack-bolt
 python-dotenv
-chromadb
 tiktoken
 nest_asyncio
 deepagents
 langgraph
 gunicorn
 graphiti-core
-
