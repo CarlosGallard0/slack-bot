@@ -423,7 +423,7 @@ class DeterministicAgent:
                 pass
             return loop.run_until_complete(self.ask_async(query, thread_id))
 
-    async def ask_async(self, query: str, thread_id: str = None) -> str:
+    async def ask_async(self, query: str, thread_id: str = None) -> dict:
         """
         Process a query using the deterministic agent graph.
         Returns the final timeline as a string.
@@ -449,12 +449,12 @@ class DeterministicAgent:
  
         f = io.StringIO()
         with contextlib.redirect_stdout(f):
-            result = await self.graph.ainvoke(initial_state)
+            config = {"configurable": {"thread_id": thread_id}}
+            result = await self.graph.ainvoke(initial_state, config=config)
         
         logs = f.getvalue()
         
         return {
             "answer": result.get("final_timeline", "No response generated."),
-            "sources": result.get("sources", ""),
             "logs": logs
         }
