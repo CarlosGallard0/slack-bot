@@ -71,4 +71,4 @@ def evaluate_query_results(results: List[dict], min_relevant: int = 2, score_thr
     )
 
 def off_topic_response(state: State):
-    return {"final_timeline": ["I'm sorry, I can only answer questions related to the medical field."]}
+    return {"final_timeline": "I'm sorry, I can only answer questions related to the medical field."}

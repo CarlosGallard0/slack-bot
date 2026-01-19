@@ -207,7 +207,7 @@ Generate 3-5 search queries for this index.""")
         Create a summary that answers the user's question based on these documents.""")
             ])
     
-    summary = summary_response.content
+    summary = str(summary_response.content)
 
     sources_used = []
     seen_sources = set()
@@ -249,7 +249,7 @@ def synthesizer(state: State):
     if not sorted_outputs:
         print("\n✗ No workers returned results - cannot generate timeline")
         error_message = ("="*80 + "\n" +
-                        "TIMELINE\n" +
+                        "Timeline\n" +
                         "="*80 + "\n" +
                         "Unfortunately, no relevant information was found in the available indexes to answer this question. "
                         "This could mean:\n"
@@ -261,12 +261,12 @@ def synthesizer(state: State):
                         "- Asking about topics more directly covered in the indexes\n"
                         "- Checking if additional indexes need to be added\n" +
                         "="*80 + "\n" +
-                        "RESEARCH LIMITATIONS\n" +
+                        "Research Limitations\n" +
                         "="*80 + "\n" +
                         "This search was attempted across the available indexes, but no documents met the relevance threshold. "
                         "All generated queries returned either no results or results with insufficient relevance scores.\n" +
                         "="*80 + "\n" +
-                        "SOURCES & REFERENCES\n" +
+                        "Sources & References\n" +
                         "="*80 + "\n" +
                         "No sources were retrieved for this query.\n")
         return {"final_timeline": error_message}
@@ -302,7 +302,7 @@ def synthesizer(state: State):
         Create a concise timeline that synthesizes this information.""")
             ])
     
-    timeline_content = final_response.content
+    timeline_content = str(final_response.content)
     
     indexes_used = [output['title'] for output in sorted_outputs]
     years_covered = [output['year'] for output in sorted_outputs]
@@ -322,7 +322,7 @@ def synthesizer(state: State):
         Generate a brief limitations statement.""")
             ])
     
-    limitations_content = limitations_response.content
+    limitations_content = str(limitations_response.content)
 
     # Simplified References
     all_sources = set()
@@ -335,11 +335,11 @@ def synthesizer(state: State):
         references_content += f"\n• {source}"
     
     # Construct concise final output
-    final_output = f"*TIMELINE*\n{timeline_content}\n\n"
-    final_output += f"*LIMITATIONS*\n{limitations_content}\n\n"
+    final_output = f"*Timeline*\n{timeline_content}\n\n"
+    final_output += f"*Limitations*\n{limitations_content}\n\n"
     final_output += f"{references_content}"
     
-    return {"final_timeline": final_output}
+    return {"final_timeline": final_output, "sources": references_content}
 
 
 def assign_workers(state: State):
@@ -455,5 +455,6 @@ class DeterministicAgent:
         
         return {
             "answer": result.get("final_timeline", "No response generated."),
+            "sources": result.get("sources", ""),
             "logs": logs
         }
