@@ -39,7 +39,7 @@ def filterer(state: State):
     ]
     
     response = model.invoke(prompt)
-    decision = response.content.strip().upper()
+    decision = str(response.content).strip().upper()
     
     is_medical = "YES" in decision
        
