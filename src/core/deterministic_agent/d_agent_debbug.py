@@ -153,6 +153,23 @@ Generate 3-5 search queries for this index."""
         try:
             edges = await graphitiClient.search(query)
 
+            print("\n===== DEBUG GRAPHITI SEARCH =====")
+            print("QUERY:", query)
+            print("EDGES TYPE:", type(edges))
+            print("EDGES LEN:", len(edges) if edges is not None else "None")
+
+            if edges:
+                print("FIRST EDGE TYPE:", type(edges[0]))
+                print(
+                    "FIRST EDGE KEYS:",
+                    edges[0].keys() if isinstance(edges[0], dict) else "Not dict",
+                )
+                print("FIRST EDGE SAMPLE:", edges[0])
+            else:
+                print("NO EDGES RETURNED")
+
+            print("===== END DEBUG GRAPHITI =====\n")
+
             for i, edge in enumerate(edges[:5]):
                 score = 0.1 + (i * 0.05)
 
@@ -190,6 +207,11 @@ Generate 3-5 search queries for this index."""
         evaluation = evaluate_query_results(
             results, min_relevant=2, score_threshold=0.6
         )
+        print("\n===== DEBUG EVALUATION =====")
+        print("QUERY:", query_str)
+        print("RESULTS COUNT:", len(results))
+        print("IS RELEVANT:", evaluation.is_relevant)
+        print("===== END DEBUG EVALUATION =====\n")
 
         if evaluation.is_relevant:
             evaluated_queries.append(query_obj)
@@ -379,6 +401,9 @@ def synthesizer(state: State):
         return raw
 
     raw_content = clean_llm_json(final_response.content)
+    print("\n===== LLM output =====")
+    print("raw_content:\n", raw_content)
+    print("===== END DEBUG =====\n")
 
     try:
         parsed = json.loads(raw_content)
@@ -400,6 +425,11 @@ def synthesizer(state: State):
             all_sources[pdf_name] = pdf_name
 
     deduplicated_sources = sorted(all_sources.values())
+
+    print("\n===== DEBUG SYNTHESIZER (FINAL) =====")
+    print("LIMITATIONS_CONTENT:\n", limitations_content)
+    print("SOURCES:\n", sorted(deduplicated_sources))
+    print("===== END DEBUG =====\n")
 
     return {
         "final_timeline": timeline_content.strip(),
@@ -504,6 +534,12 @@ class DeterministicAgent:
 
         config = {"configurable": {"thread_id": thread_id}}
         result = await self.graph.ainvoke(initial_state, config=config)
+
+        print("\n===== DEBUG ASK_ASYNC =====")
+        print("FINAL_TIMELINE:\n", result.get("final_timeline"))
+        print("\nFINAL_LIMITATIONS:\n", result.get("limitations"))
+        print("\nFINAL_SOURCES:\n", result.get("sources"))
+        print("===== END DEBUG ASK_ASYNC =====\n")
 
         timeline = result.get("final_timeline", "").strip()
 
