@@ -13,6 +13,24 @@ from src.core.deterministic_agent.utils import evaluate_query_results, off_topic
 from src.core.deterministic_agent.utils import GeneratedQueries, SelectedIndexes, State, WorkerInput, QueryEvaluation
 from src.core.deterministic_agent.utils import IndexMetadata
 
+def clean_source_name(source: str) -> str:
+    """
+    Clean chunked source names to extract the base file name.
+    Removes chunk numbers and timestamps from paths like:
+    new_docs/41377627_Title.pdf_1_1768420545.461907 -> new_docs/41377627_Title.pdf
+    """
+    if '.pdf' not in source:
+        return source
+    
+    # Split by '_' and find the part with .pdf
+    parts = source.split('_')
+    for i, part in enumerate(parts):
+        if '.pdf' in part:
+            # Include up to and including the .pdf part
+            base = '_'.join(parts[:i+1])
+            return base
+    return source
+
 load_dotenv(override=True)
 
 
@@ -179,7 +197,7 @@ Generate 3-5 search queries for this index.""")
     
     top_chunks = unique_chunks[:10]
     chunks_context = "\n\n---\n\n".join([
-        f"Source: {chunk['metadata']['source']}\n"
+        f"Source: {clean_source_name(chunk['metadata']['source'])}\n"
         f"Topic: {chunk['metadata']['topic']}\n"
         f"Relevance Score: {chunk['score']:.3f}\n"
         f"Content: {chunk['text']}"
@@ -213,7 +231,7 @@ Generate 3-5 search queries for this index.""")
     seen_sources = set()
     
     for chunk in top_chunks:
-        source = chunk['metadata']['source']
+        source = clean_source_name(chunk['metadata']['source'])
         if source not in seen_sources:
             seen_sources.add(source)
             sources_used.append({
