@@ -65,6 +65,7 @@ class State(TypedDict):
     is_medical: bool
     limitations: str
     sources: List[str]
+    rag_type: str  # Added to support switching between Graphiti and Raptor
 
 
 class WorkerInput(TypedDict):
@@ -73,6 +74,7 @@ class WorkerInput(TypedDict):
     user_question: str
     index_metadata: IndexMetadata
     selected_index: SelectedIndex
+    rag_type: str  # Added to support switching between Graphiti and Raptor
 
 
 def evaluate_query_results(

@@ -6,7 +6,7 @@ from langchain.messages import SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
 from langchain_google_genai import ChatGoogleGenerativeAI
-from src.rag.graphiti import GraphitiClient
+from src.rag.adapter import RAGAdapter
 import nest_asyncio
 from src.core.deterministic_agent.utils import (
     evaluate_query_results,
@@ -50,7 +50,7 @@ model = ChatGoogleGenerativeAI(
     vertexai=True,
 )
 
-graphitiClient = GraphitiClient()
+rag_adapter = RAGAdapter(os.getenv("RAG_TYPE", "graphiti"))
 
 
 def filterer(state: State):
@@ -136,9 +136,9 @@ async def worker_node(state: WorkerInput):
     index_id = state["index_metadata"].index_id
 
     try:
-        await graphitiClient.initialize()
+        await rag_adapter.initialize(index_id)
     except Exception as e:
-        print(f"  ✗ Failed to initialize Graphiti client: {e}")
+        print(f"  ✗ Failed to initialize RAG adapter for {index_id}: {e}")
         return {"worker_outputs": []}
 
     query_gen_llm = model.with_structured_output(GeneratedQueries)
@@ -171,18 +171,19 @@ Generate 3-5 search queries for this index."""
 
     for query in query_strings:
         try:
-            edges = await graphitiClient.search(query)
+            results = await rag_adapter.search(query, index_id)
 
-            for i, edge in enumerate(edges[:5]):
-                score = 0.1 + (i * 0.05)
+            for i, res in enumerate(results[:5]):
+                # If the score is the default or coming from the adapter, we can use it
+                # Graphiti implementation in adapter provides a mock score of 0.5
+                # Raptor implementation provides real scores
+                score = res.get("score", 0.1 + (i * 0.05))
 
                 all_results.append(
                     {
-                        "text": edge["fact"],
+                        "text": res["text"],
                         "metadata": {
-                            "source": edge.get(
-                                "source_title", "Graphiti Knowledge Graph"
-                            ),
+                            "source": res["source"],
                             "topic": "General",
                             "year": state["index_metadata"].year,
                         },
@@ -442,6 +443,7 @@ def assign_workers(state: State):
                 "user_question": state["user_question"],
                 "index_metadata": index_map[selected.index_id],
                 "selected_index": selected,
+                "rag_type": state["rag_type"],
             },
         )
         for selected in state["selected_indexes"]
@@ -480,38 +482,53 @@ def build_research_timeline_graph():
 
 
 class DeterministicAgent:
-    def __init__(self):
+    def __init__(self, rag_type: str = None):
+        self.rag_type = rag_type or os.getenv("RAG_TYPE", "graphiti")
+        global rag_adapter
+        rag_adapter = RAGAdapter(self.rag_type)
         self.graph = build_research_timeline_graph()
 
-    def ask(self, query: str, thread_id: str = None) -> str:
+    def ask(self, query: str, thread_id: str = None, rag_type: str = None) -> dict:
         """
         Synchronous wrapper for ask_async
         """
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(self.ask_async(query, thread_id))
+            return asyncio.run(self.ask_async(query, thread_id, rag_type))
         else:
             try:
                 nest_asyncio.apply()
             except ImportError:
                 pass
-            return loop.run_until_complete(self.ask_async(query, thread_id))
+            return loop.run_until_complete(self.ask_async(query, thread_id, rag_type))
 
-    async def ask_async(self, query: str, thread_id: str = None) -> dict:
+    async def ask_async(self, query: str, thread_id: str = None, rag_type: str = None) -> dict:
         """
         Process a query using the deterministic agent graph.
         Returns the final timeline as a string.
         """
 
-        default_indexes = [
-            IndexMetadata(
-                index_id="graphiti_main",
-                title="Medical Knowledge Graph",
-                year="2024",
-                summary="A comprehensive medical knowledge graph containing information about diseases, treatments, and clinical research.",
-            )
-        ]
+        target_rag = rag_type or self.rag_type
+        
+        if target_rag == "graphiti":
+            default_indexes = [
+                IndexMetadata(
+                    index_id="graphiti_main",
+                    title="Medical Knowledge Graph",
+                    year=2024,
+                    summary="A comprehensive medical knowledge graph containing information about diseases, treatments, and clinical research.",
+                )
+            ]
+        else:
+            default_indexes = [
+                IndexMetadata(
+                    index_id="raptor_main",
+                    title="Raptor Document Index",
+                    year=2024,
+                    summary="A hierarchical index of medical research documents using RAPTOR (Recursive Abstractive Processing for Tree-Organized Retrieval).",
+                )
+            ]
 
         initial_state = {
             "user_question": query,
@@ -520,6 +537,7 @@ class DeterministicAgent:
             "is_medical": False,
             "worker_outputs": [],
             "final_timeline": "",
+            "rag_type": rag_type or self.rag_type,
         }
 
         config = {"configurable": {"thread_id": thread_id}}
