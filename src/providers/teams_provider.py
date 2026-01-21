@@ -8,7 +8,7 @@ from botbuilder.core import (
 from botbuilder.schema import Activity, ActivityTypes
 
 from src.providers.base import BaseProvider
-from src.core.agent import AgentCore
+from src.core.regular_agent.agent import AgentCore
 
 class TeamsProvider(BaseProvider):
     def __init__(self, agent: AgentCore):

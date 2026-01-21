@@ -1,7 +1,7 @@
 from langchain_core.tools import tool
 from typing import Optional
 from pydantic import BaseModel, Field
-from src.core.deep_agents.raptor import RaptorLangChain
+from src.rag.raptor import RaptorLangChain
 from utils import get_embeddings_from_provider
 
 embedding_client = get_embeddings_from_provider()

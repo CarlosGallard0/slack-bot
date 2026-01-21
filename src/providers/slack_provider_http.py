@@ -4,8 +4,11 @@ from flask import Flask, request
 from slack_bolt import App
 from slack_bolt.adapter.flask import SlackRequestHandler
 from src.providers.base import BaseProvider
-from src.core.deep_agent import AgentCore
 from dotenv import load_dotenv
+from src.providers.slack_blocks import (
+    render_timeline_blocks,
+    format_sources_blocks,
+)
 
 load_dotenv(override=True)
 
@@ -13,28 +16,31 @@ app_flask = Flask(__name__)
 slack_app = None
 handler = None
 
+
 class SlackProviderHTTP(BaseProvider):
     """HTTP-based Slack provider for Cloud Run deployment"""
-    
-    def __init__(self, agent: AgentCore):
+
+    def __init__(self, agent):
         global slack_app, handler
         self.agent = agent
         self.app = App(
             token=os.environ.get("SLACK_BOT_TOKEN"),
-            signing_secret=os.environ.get("SLACK_SIGNING_SECRET")
+            signing_secret=os.environ.get("SLACK_SIGNING_SECRET"),
         )
         self.handler = SlackRequestHandler(self.app)
-        
+
         slack_app = self.app
         handler = self.handler
-        
+
         self.setup_handlers()
 
     def setup_handlers(self):
 
         @self.app.middleware
         def log_request(logger, body, next):
-            print(f"DEBUG: Received event type: {body.get('event', {}).get('type', body.get('type'))}")
+            print(
+                f"DEBUG: Received event type: {body.get('event', {}).get('type', body.get('type'))}"
+            )
             return next()
 
         @self.app.event("app_mention")
@@ -62,35 +68,74 @@ class SlackProviderHTTP(BaseProvider):
 
     def respond_with_thinking(self, channel, query, say):
         try:
-            # Start the processing thread immediately to prevent blocking the Slack ACK
+
             def process_request():
                 initial_message = None
                 try:
-                    # Move the initial response inside the thread to avoid blocking
-                    initial_message = say("Thinking...")
-                    
+                    thinking_blocks = [
+                        {
+                            "type": "context",
+                            "elements": [
+                                {
+                                    "type": "image",
+                                    "image_url": (
+                                        "https://i.giphy.com/media/"
+                                        "v1.Y2lkPTc5MGI3NjExNHJueGZ4ZzRyeGZ4ZzRyeGZ4"
+                                        "ZzRyeGZ4ZzRyeGZ4ZzRyeGZ4JmVwPXYxX2ludGVy"
+                                        "bmFsX2dpZl9ieV9pZCZjdD1n/3o7bu3XilJ5BOiSGic/giphy.gif"
+                                    ),
+                                    "alt_text": "thinking",
+                                },
+                                {
+                                    "type": "mrkdwn",
+                                    "text": "_Analyzing medical databases..._",
+                                },
+                            ],
+                        }
+                    ]
+
+                    initial_message = say(
+                        channel=channel,
+                        text="Thinking...",
+                        blocks=thinking_blocks,
+                    )
+
                     print(f"Processing query: {query} in thread: {channel}")
                     response = self.agent.ask(query, thread_id=channel)
-                    
-                    self.app.client.chat_update(
-                        channel=channel,
-                        ts=initial_message["ts"],
-                        text=response
-                    )
+
+                    if isinstance(response, dict):
+                        timeline_blocks = render_timeline_blocks(response)
+                        sources_blocks = format_sources_blocks(
+                            response.get("sources", [])
+                        )
+
+                        self.app.client.chat_update(
+                            channel=channel,
+                            ts=initial_message["ts"],
+                            blocks=timeline_blocks,
+                            text="Medical Research Timeline",
+                        )
+
+                        if sources_blocks:
+                            self.app.client.chat_postMessage(
+                                channel=channel,
+                                thread_ts=initial_message["ts"],
+                                blocks=sources_blocks,
+                                text="Related Sources",
+                            )
+
                 except Exception as e:
                     print(f"Error in response flow: {e}")
                     error_msg = f"Sorry, I ran into an error: {e}"
                     if initial_message:
                         self.app.client.chat_update(
-                            channel=channel,
-                            ts=initial_message["ts"],
-                            text=error_msg
+                            channel=channel, ts=initial_message["ts"], text=error_msg
                         )
                     else:
                         try:
                             say(error_msg)
                         except Exception as say_error:
-                             print(f"Could not send error message: {say_error}")
+                            print(f"Could not send error message: {say_error}")
 
             threading.Thread(target=process_request).start()
 
@@ -106,6 +151,7 @@ class SlackProviderHTTP(BaseProvider):
 
     def send_message(self, channel: str, text: str):
         self.app.client.chat_postMessage(channel=channel, text=text)
+
 
 @app_flask.route("/health", methods=["GET"])
 def health_check():

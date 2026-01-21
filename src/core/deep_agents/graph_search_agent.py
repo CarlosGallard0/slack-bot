@@ -1,5 +1,5 @@
 from langchain_core.tools import tool
-from src.core.deep_agents.graphiti import GraphitiClient
+from src.rag.graphiti import GraphitiClient
 
 @tool
 async def graph_search_tool(query: str) -> str:

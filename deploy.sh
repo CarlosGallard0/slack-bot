@@ -5,7 +5,7 @@ set -e
 
 # Load environment variables from .env
 if [ -f .env ]; then
-    export $(cat .env | grep -v '^#' | grep -v '^$' | xargs)
+    export $(cat .env | grep -v '^#' | grep -v '^$' | sed 's/#.*//' | xargs)
 else
     echo "❌ .env file not found"
     exit 1
