@@ -65,7 +65,9 @@ class State(TypedDict):
     is_medical: bool
     limitations: str
     sources: List[str]
-    rag_type: str  # Added to support switching between Graphiti and Raptor
+    rag_type: str  # The configured default RAG type
+    rag_type_decision: str  # The decision made by filterer/router: 'graphiti' for timeline, 'raptor' for facts
+    synthesized_answer: str # Final answer for non-timeline queries
 
 
 class WorkerInput(TypedDict):
@@ -74,7 +76,8 @@ class WorkerInput(TypedDict):
     user_question: str
     index_metadata: IndexMetadata
     selected_index: SelectedIndex
-    rag_type: str  # Added to support switching between Graphiti and Raptor
+    rag_type: str
+    rag_type_decision: str
 
 
 def evaluate_query_results(

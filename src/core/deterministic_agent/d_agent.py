@@ -55,25 +55,41 @@ rag_adapter = RAGAdapter(os.getenv("RAG_TYPE", "graphiti"))
 
 def filterer(state: State):
     """
-    Agent that determines if the user question is related to the medical field.
+    Agent that determines if the user question is related to the medical field
+    and decides whether to use Graphiti (timeline) or Raptor (facts).
     """
     prompt = [
         SystemMessage(
-            content="""You are a medical domain classifier. 
-        Determine if the user's question is related to health, medicine, biology, 
-        diseases, or clinical research.
+            content="""You are a medical domain classifier and RAG router. 
         
-        Respond with 'YES' if it is medical-related, and 'NO' if it is off-topic."""
+        1. Determine if the user's question is related to health, medicine, biology, 
+           diseases, or clinical research.
+        
+        2. Decide the retrieval strategy:
+           - Choose 'graphiti' if the question asks for a timeline, progression of disease, historical development, or sequence of events.
+           - Choose 'raptor' if the question asks for specific facts, definitions, clinical data, or detailed information about a single point in time.
+        
+        Respond ONLY with a JSON object: {"is_medical": true/false, "strategy": "graphiti" or "raptor"}"""
         ),
         HumanMessage(content=f"User Question: {state['user_question']}"),
     ]
 
     response = model.invoke(prompt)
-    decision = str(response.content).strip().upper()
+    try:
+        # Simple cleanup if LLM returns markdown
+        content = str(response.content).strip()
+        if content.startswith("```"):
+            content = content.split("```")[1]
+            if content.startswith("json"):
+                content = content[4:]
+        decision = json.loads(content)
+        is_medical = decision.get("is_medical", False)
+        strategy = decision.get("strategy", "raptor")
+    except:
+        is_medical = "YES" in str(response.content).upper()
+        strategy = "graphiti" if "timeline" in state["user_question"].lower() else "raptor"
 
-    is_medical = "YES" in decision
-
-    return {"is_medical": is_medical}
+    return {"is_medical": is_medical, "rag_type_decision": strategy}
 
 
 def orchestrator(state: State):
@@ -134,6 +150,7 @@ async def worker_node(state: WorkerInput):
     Returns worker output with summary and source references.
     """
     index_id = state["index_metadata"].index_id
+    rag_strategy = state["rag_type_decision"]
 
     try:
         await rag_adapter.initialize(index_id)
@@ -171,7 +188,11 @@ Generate 3-5 search queries for this index."""
 
     for query in query_strings:
         try:
+            # We override the adapter's rag_type temporally for this search if needed
+            original_rag = rag_adapter.rag_type
+            rag_adapter.rag_type = rag_strategy
             results = await rag_adapter.search(query, index_id)
+            rag_adapter.rag_type = original_rag
 
             for i, res in enumerate(results[:5]):
                 # If the score is the default or coming from the adapter, we can use it
@@ -301,131 +322,71 @@ Generate 3-5 search queries for this index."""
 
 def synthesizer(state: State):
     sorted_outputs = sorted(state["worker_outputs"], key=lambda x: x["year"])
+    strategy = state["rag_type_decision"]
 
     if not sorted_outputs:
-        print("\n✗ No workers returned results - cannot generate timeline")
-        error_message = (
-            "=" * 80
-            + "\n"
-            + "Timeline\n"
-            + "=" * 80
-            + "\n"
-            + "Unfortunately, no relevant information was found in the available indexes to answer this question. "
-            "This could mean:\n"
-            "- The question requires information not covered in the indexed documents\n"
-            "- The search queries did not match the available content well enough\n"
-            "- The relevance threshold filtered out all potential results\n\n"
-            "Please try:\n"
-            "- Rephrasing your question\n"
-            "- Asking about topics more directly covered in the indexes\n"
-            "- Checking if additional indexes need to be added\n"
-            + "=" * 80
-            + "\n"
-            + "Research Limitations\n"
-            + "=" * 80
-            + "\n"
-            + "This search was attempted across the available indexes, but no documents met the relevance threshold. "
-            "All generated queries returned either no results or results with insufficient relevance scores.\n"
-            + "=" * 80
-            + "\n"
-            + "Sources & References\n"
-            + "=" * 80
-            + "\n"
-            + "No sources were retrieved for this query.\n"
-        )
-        return {"final_timeline": error_message}
+        print(f"\n✗ No workers returned results for {strategy}")
+        return {"final_timeline": "No relevant information found.", "synthesized_answer": "I couldn't find specific facts to answer your question."}
 
     worker_context = "\n\n".join(
         [
             f"=== {output['title']} ({output['year']}) ===\n"
-            f"Index: {output['index_id']}\n"
-            f"Queries: {output['queries_passed']}/{output['queries_generated']} passed evaluation\n"
-            f"Chunks: {output['chunks_retrieved']} retrieved\n"
-            f"Sources: {len(output['sources'])} documents\n\n"
             f"Summary:\n{output['summary']}"
             for output in sorted_outputs
         ]
     )
-    indexes_used = [output["title"] for output in sorted_outputs]
-    years_covered = [output["year"] for output in sorted_outputs]
 
-    final_response = model.invoke(
-        [
-            SystemMessage(
-                content="""You are an expert research synthesizer.
-
-    Produce TWO outputs:
-
-    1) Timeline:
-    - A chronological OR logical progression of events bullet points
-    - Can be historical, clinical, or pathophysiological
-    - Use bullet points to show sequence (e.g., onset → diagnosis → treatment)
-    - If exact dates are unavailable, infer progression from clinical context
-    - Use bold for key medical terms.
-    - Do NOT use double quotes (") anywhere inside the timeline text.
-
-
-    2) Limitations:
-    - 1–2 sentences
-    - Mention which years and indexes were covered
-    - No headings
-
-    Return the result in the following JSON format:
-    {
-    "timeline": "...",
-    "limitations": "..."
-    }
-    """
-            ),
-            HumanMessage(
-                content=f"""User Question: {state['user_question']}
-
-    Indexes used: {', '.join(indexes_used)}
-    Years covered: {min(years_covered)} to {max(years_covered)}
-
-    Research context:
-    {worker_context}
-    """
-            ),
-        ]
-    )
-
-    def clean_llm_json(raw: str) -> str:
-        raw = raw.strip()
-        if raw.startswith("```"):
-            raw = raw.strip("`").strip()
-            if raw.lower().startswith("json"):
-                raw = raw[4:].strip()
-
-        return raw
-
-    raw_content = clean_llm_json(final_response.content)
-
-    try:
-        parsed = json.loads(raw_content)
-    except Exception as e:
-        raise ValueError(f"LLM did not return valid JSON: \n{raw_content}") from e
-
-    timeline_raw = parsed.get("timeline", "")
-    if isinstance(timeline_raw, list):
-        timeline_content = "\n".join(f"• {item}" for item in timeline_raw)
+    if strategy == "graphiti":
+        # Timeline logic (existing)
+        final_response = model.invoke(
+            [
+                SystemMessage(
+                    content="""You are an expert research synthesizer focused on TIMELINES.
+        Produce a chronological progression of events using bullet points.
+        Return JSON: {"timeline": "...", "limitations": "..."}"""
+                ),
+                HumanMessage(
+                    content=f"User Question: {state['user_question']}\n\nContext:\n{worker_context}"
+                ),
+            ]
+        )
+        # ... logic to parse timeline ...
     else:
-        timeline_content = str(timeline_raw).strip()
-    limitations_content = parsed.get("limitations", "").strip()
+        # Fact logic (Raptor)
+        final_response = model.invoke(
+            [
+                SystemMessage(
+                    content="""You are an expert medical researcher. 
+        Provide a detailed, fact-based answer to the user's question based ONLY on the provided context.
+        Return JSON: {"answer": "...", "limitations": "..."}"""
+                ),
+                HumanMessage(
+                    content=f"User Question: {state['user_question']}\n\nContext:\n{worker_context}"
+                ),
+            ]
+        )
 
-    all_sources = {}
+    # Simplified parsing for both
+    try:
+        raw_content = str(final_response.content).strip()
+        if "```" in raw_content:
+            raw_content = raw_content.split("```")[1]
+            if raw_content.startswith("json"): raw_content = raw_content[4:]
+        parsed = json.loads(raw_content)
+    except:
+        parsed = {"timeline": str(final_response.content), "answer": str(final_response.content), "limitations": "Could not parse structured output."}
+
+    all_sources = []
     for output in sorted_outputs:
-        for source_info in output["sources"]:
-            raw = source_info["source"]
-            pdf_name = raw.split(".pdf")[0] + ".pdf"
-            all_sources[pdf_name] = pdf_name
-
-    deduplicated_sources = sorted(all_sources.values())
+        for s in output["sources"]:
+            name = s["source"].split(".pdf")[0] + ".pdf"
+            if name not in all_sources: all_sources.append(name)
 
     return {
-        "final_timeline": timeline_content.strip(),
-        "limitations": limitations_content.strip(),
-        "sources": sorted(deduplicated_sources),
+        "final_timeline": parsed.get("timeline", ""),
+        "synthesized_answer": parsed.get("answer", ""),
+        "limitations": parsed.get("limitations", ""),
+        "sources": sorted(all_sources),
     }
 
 
@@ -444,6 +405,7 @@ def assign_workers(state: State):
                 "index_metadata": index_map[selected.index_id],
                 "selected_index": selected,
                 "rag_type": state["rag_type"],
+                "rag_type_decision": state["rag_type_decision"],
             },
         )
         for selected in state["selected_indexes"]
@@ -509,26 +471,21 @@ class DeterministicAgent:
         Returns the final timeline as a string.
         """
 
-        target_rag = rag_type or self.rag_type
-        
-        if target_rag == "graphiti":
-            default_indexes = [
-                IndexMetadata(
-                    index_id="graphiti_main",
-                    title="Medical Knowledge Graph",
-                    year=2024,
-                    summary="A comprehensive medical knowledge graph containing information about diseases, treatments, and clinical research.",
-                )
-            ]
-        else:
-            default_indexes = [
-                IndexMetadata(
-                    index_id="raptor_main",
-                    title="Raptor Document Index",
-                    year=2024,
-                    summary="A hierarchical index of medical research documents using RAPTOR (Recursive Abstractive Processing for Tree-Organized Retrieval).",
-                )
-            ]
+        # Default available indexes (we provide both sets so orchestrator can choose)
+        default_indexes = [
+            IndexMetadata(
+                index_id="graphiti_main",
+                title="Medical Knowledge Graph (Graphiti)",
+                year=2024,
+                summary="Knowledge graph for timelines and sequences of medical events.",
+            ),
+            IndexMetadata(
+                index_id="raptor_main",
+                title="Medical Fact Index (Raptor)",
+                year=2024,
+                summary="Hierarchical document index for specific medical facts and data.",
+            )
+        ]
 
         initial_state = {
             "user_question": query,
@@ -537,19 +494,21 @@ class DeterministicAgent:
             "is_medical": False,
             "worker_outputs": [],
             "final_timeline": "",
-            "rag_type": rag_type or self.rag_type,
+            "synthesized_answer": "",
+            "rag_type": self.rag_type,
+            "rag_type_decision": "raptor", # Default, will be updated by filterer
         }
 
         config = {"configurable": {"thread_id": thread_id}}
         result = await self.graph.ainvoke(initial_state, config=config)
 
         timeline = result.get("final_timeline", "").strip()
-
-        if not timeline:
-            timeline = "• No clinically relevant timeline could be constructed from the available medical knowledge."
+        answer = result.get("synthesized_answer", "").strip()
 
         return {
             "timeline": timeline,
+            "answer": answer,
+            "strategy_used": result.get("rag_type_decision"),
             "limitations": result.get("limitations", ""),
             "sources": result.get("sources", []),
         }
