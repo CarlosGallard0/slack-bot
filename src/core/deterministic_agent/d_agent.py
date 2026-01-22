@@ -58,6 +58,12 @@ def filterer(state: State):
     Agent that determines if the user question is related to the medical field
     and decides whether to use Graphiti (timeline) or Raptor (facts).
     """
+    question = state["user_question"].lower().strip()
+    if question.startswith("what is") or question.startswith("define"):
+        return {
+            "is_medical": True,
+            "rag_type_decision": "raptor",
+        }
     prompt = [
         SystemMessage(
             content="""You are a medical domain classifier and RAG router. 
@@ -87,7 +93,9 @@ def filterer(state: State):
         strategy = decision.get("strategy", "raptor")
     except:
         is_medical = "YES" in str(response.content).upper()
-        strategy = "graphiti" if "timeline" in state["user_question"].lower() else "raptor"
+        strategy = (
+            "graphiti" if "timeline" in state["user_question"].lower() else "raptor"
+        )
 
     return {"is_medical": is_medical, "rag_type_decision": strategy}
 
@@ -229,13 +237,30 @@ Generate 3-5 search queries for this index."""
         query_str = query_obj.query
         results = results_by_query.get(query_str, [])
 
-        evaluation = evaluate_query_results(
-            results, min_relevant=2, score_threshold=0.6
-        )
+        if rag_strategy == "raptor":
+            min_relevant = 1
+            score_threshold = 0.3
+        else:
+            min_relevant = 2
+            score_threshold = 0.6
 
-        if evaluation.is_relevant:
+        if rag_strategy == "raptor":
             evaluated_queries.append(query_obj)
-            relevant_chunks.extend([r for r in results if r["score"] < 0.6])
+            relevant_chunks.extend(
+                [r for r in results if r["score"] >= score_threshold]
+            )
+        else:
+            evaluation = evaluate_query_results(
+                results,
+                min_relevant=min_relevant,
+                score_threshold=score_threshold,
+            )
+
+            if evaluation.is_relevant:
+                evaluated_queries.append(query_obj)
+                relevant_chunks.extend(
+                    [r for r in results if r["score"] >= score_threshold]
+                )
 
     if len(evaluated_queries) == 0:
         return {"worker_outputs": []}
@@ -326,7 +351,10 @@ def synthesizer(state: State):
 
     if not sorted_outputs:
         print(f"\n✗ No workers returned results for {strategy}")
-        return {"final_timeline": "No relevant information found.", "synthesized_answer": "I couldn't find specific facts to answer your question."}
+        return {
+            "final_timeline": "No relevant information found.",
+            "synthesized_answer": "I couldn't find specific facts to answer your question.",
+        }
 
     worker_context = "\n\n".join(
         [
@@ -371,16 +399,22 @@ def synthesizer(state: State):
         raw_content = str(final_response.content).strip()
         if "```" in raw_content:
             raw_content = raw_content.split("```")[1]
-            if raw_content.startswith("json"): raw_content = raw_content[4:]
+            if raw_content.startswith("json"):
+                raw_content = raw_content[4:]
         parsed = json.loads(raw_content)
     except:
-        parsed = {"timeline": str(final_response.content), "answer": str(final_response.content), "limitations": "Could not parse structured output."}
+        parsed = {
+            "timeline": str(final_response.content),
+            "answer": str(final_response.content),
+            "limitations": "Could not parse structured output.",
+        }
 
     all_sources = []
     for output in sorted_outputs:
         for s in output["sources"]:
             name = s["source"].split(".pdf")[0] + ".pdf"
-            if name not in all_sources: all_sources.append(name)
+            if name not in all_sources:
+                all_sources.append(name)
 
     return {
         "final_timeline": parsed.get("timeline", ""),
@@ -465,7 +499,9 @@ class DeterministicAgent:
                 pass
             return loop.run_until_complete(self.ask_async(query, thread_id, rag_type))
 
-    async def ask_async(self, query: str, thread_id: str = None, rag_type: str = None) -> dict:
+    async def ask_async(
+        self, query: str, thread_id: str = None, rag_type: str = None
+    ) -> dict:
         """
         Process a query using the deterministic agent graph.
         Returns the final timeline as a string.
@@ -484,7 +520,7 @@ class DeterministicAgent:
                 title="Medical Fact Index (Raptor)",
                 year=2024,
                 summary="Hierarchical document index for specific medical facts and data.",
-            )
+            ),
         ]
 
         initial_state = {
@@ -496,7 +532,7 @@ class DeterministicAgent:
             "final_timeline": "",
             "synthesized_answer": "",
             "rag_type": self.rag_type,
-            "rag_type_decision": "raptor", # Default, will be updated by filterer
+            "rag_type_decision": "raptor",  # Default, will be updated by filterer
         }
 
         config = {"configurable": {"thread_id": thread_id}}

@@ -4,6 +4,7 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from src.providers.base import BaseProvider
 from src.providers.slack_blocks import (
     render_timeline_blocks,
+    render_fact_blocks,
     post_sources_reply,
 )
 
@@ -55,23 +56,28 @@ class SlackProvider(BaseProvider):
             )
 
             response = self.agent.ask(query, thread_id=channel)
-            if "timeline" in response:
+            strategy = response.get("strategy_used", "graphiti")
+
+            if strategy == "graphiti":
                 blocks = render_timeline_blocks(response)
+            else:
+                blocks = render_fact_blocks(response)
 
-                self.app.client.chat_update(
+            self.app.client.chat_update(
+                channel=channel,
+                ts=initial_message["ts"],
+                blocks=blocks,
+                text="Medical research response",
+            )
+
+            sources = response.get("sources", [])
+            if sources:
+                post_sources_reply(
+                    say=say,
+                    sources=sources,
                     channel=channel,
-                    ts=initial_message["ts"],
-                    blocks=blocks,
+                    thread_ts=initial_message["ts"],
                 )
-
-                sources = response.get("sources", [])
-                if sources:
-                    post_sources_reply(
-                        say=say,
-                        sources=sources,
-                        channel=channel,
-                        thread_ts=initial_message["ts"],
-                    )
 
         except Exception as e:
             print(f"Error in SlackProvider: {e}")
